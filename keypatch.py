@@ -73,6 +73,8 @@ class PatcherDialog(QDialog):
 		super(PatcherDialog, self).__init__(parent)
 		self.context = context
 
+		self.setWindowTitle('KEYPATCH:: Patcher')
+
 		layoutF = QFormLayout()
 		self.setLayout(layoutF)
 
@@ -83,6 +85,8 @@ class PatcherDialog(QDialog):
 		self.qcb_arch.currentTextChanged.connect(self.reassemble)
 
 		self.qle_address = QLineEdit('00000000')
+		self.qle_address.setText(hex(self.context.address))
+
 		self.qle_address.textChanged.connect(self.reassemble)
 		self.qle_assembly = QLineEdit('nop')
 		self.qle_assembly.textChanged.connect(self.reassemble)
@@ -96,6 +100,8 @@ class PatcherDialog(QDialog):
 		check_save_original.setChecked(True)
 		btn_cancel = QPushButton('Cancel')
 		btn_cancel.clicked.connect(self.cancel)
+		btn_patch = QPushButton('Patch')
+		btn_patch.clicked.connect(self.patch)
 
 		layoutF.addRow('Architecture:', self.qcb_arch)
 		layoutF.addRow('Address:', self.qle_address)
@@ -104,7 +110,7 @@ class PatcherDialog(QDialog):
 		layoutF.addRow('Size:', self.qle_size)
 		layoutF.addRow(check_nops)
 		layoutF.addRow(check_save_original)
-		layoutF.addRow(btn_cancel, QPushButton('Patch'))
+		layoutF.addRow(btn_cancel, btn_patch)
 
 		self.reassemble()
 
@@ -118,8 +124,8 @@ class PatcherDialog(QDialog):
 			addr = int(self.qle_address.text(), 16)
 
 			assembly = self.qle_assembly.text()
-			
-			print('(%s, %s, %s)' % (arch_name, addr, assembly))
+
+			#print('(%s, %s, %s)' % (arch_name, addr, assembly))
 			encoding, count = ks.asm(assembly)
 			self.qle_encoding.setText(' '.join(['%02X'%x for x in encoding]))
 			self.qle_size.setText('%d' % count)
@@ -134,15 +140,24 @@ class PatcherDialog(QDialog):
 			self.qle_size.setText('')
 			self.qle_encoding.setText(str(e))
 			self.qle_encoding.home(True)
-	
+
+	def patch(self):
+		try:
+			addr = int(self.qle_address.text(), 16)
+			values = [int(x, 16) for x in self.qle_encoding.text().split(' ')]
+			data = bytes(values)
+			self.context.binaryView.write(addr, data)
+		except Exception as e:
+			print(e)
+
 	def cancel(self):
-		print('cancel')
 		self.close()
 
 #------------------------------------------------------------------------------
 # main
 #------------------------------------------------------------------------------
 
+# input: binaryninjaui.UIActionContext (struct UIActionContext from api/ui/action.h)
 def launch_patcher(context):
 	if context.binaryView == None:
 		show_message_box('KEYPATCH', 'no binary', MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
