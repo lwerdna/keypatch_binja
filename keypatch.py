@@ -127,6 +127,20 @@ def disassemble_binja_single(bview, addr):
 	strs = [' ' if s.isspace() else s for s in strs]
 	return (''.join(strs), length)
 
+# get length of instruction at addr
+def disassemble_length(bview, addr):
+	(instxt, length) = disassemble_binja_single(bview, addr)
+	return length
+
+# get length of instruction sequence until limit size
+def disassemble_length_until(bview, addr, limit):
+	result = 0
+	while result < limit:
+		tmp = disassemble_length(bview, addr)
+		addr += tmp
+		result += tmp
+	return result
+
 #------------------------------------------------------------------------------
 # patcher tool
 #------------------------------------------------------------------------------
@@ -153,10 +167,10 @@ class PatcherDialog(QDialog):
 		self.qle_encoding.setReadOnly(True)
 		self.qle_size = QLineEdit()
 		self.qle_size.setReadOnly(True)
-		check_nops = QCheckBox('NOPs padding until next instruction boundary')
-		check_nops.setChecked(True)
-		check_save_original = QCheckBox('Save original instructions in binja comment')
-		check_save_original.setChecked(True)
+		self.check_nops = QCheckBox('NOPs padding until next instruction boundary')
+		self.check_nops.setChecked(True)
+		self.check_save_original = QCheckBox('Save original instructions in binja comment')
+		self.check_save_original.setChecked(True)
 		btn_cancel = QPushButton('Cancel')
 		btn_patch = QPushButton('Patch')
 
@@ -165,8 +179,8 @@ class PatcherDialog(QDialog):
 		layoutF.addRow('&Assembly:', self.qle_assembly)
 		layoutF.addRow('Encoding:', self.qle_encoding)
 		layoutF.addRow('Size:', self.qle_size)
-		layoutF.addRow(check_nops)
-		layoutF.addRow(check_save_original)
+		layoutF.addRow(self.check_nops)
+		layoutF.addRow(self.check_save_original)
 		layoutF.addRow(btn_cancel, btn_patch)
 
 		# initialize fields
@@ -202,19 +216,50 @@ class PatcherDialog(QDialog):
 		btn_cancel.clicked.connect(self.cancel)
 		btn_patch.clicked.connect(self.patch)
 
-	def reassemble(self):
-		do_clear = False
+	#
+	# accessors
+	#
+	def arch(self):
+		# 'thumbv8: Thumb V8 - little endian' -> 'thumbv8'
+		name_descr = self.qcb_arch.currentText()
+		return name_descr.split(':')[0]
+
+	def asm(self):
+		return self.qle_assembly.text()
+
+	def ks(self):
+		return architecture_to_ks.get(self.arch())
+
+	def addr(self):
+		return int(self.qle_address.text(), 16)
+
+	def data(self):
 		try:
-			arch_name_descr = self.qcb_arch.currentText()
-			arch_name = arch_name_descr.split(':')[0]
-			ks = architecture_to_ks[arch_name]
+			values = [int(x, 16) for x in self.qle_encoding.text().split(' ')]
+			return bytes(values)
+		except Exception:
+			return None
 
-			addr = int(self.qle_address.text(), 16)
+	def bv(self):
+		return self.context.binaryView
 
-			assembly = self.qle_assembly.text()
+	#
+	# functions
+	#
+	def nop(self):
+		arch = self.arch()
+		if arch in ['x16', 'x32', 'x64', 'x16att', 'x32att', 'x64att', 'x16nasm', 'x32nasm', 'x64nasm']:
+			return b'\x90'
+		elif arch in ['thumb', 'thumbv8']:
+			return b'\x00\xbf'
+		elif arch in ['thumbbe', 'thumbv8be']:
+			return b'\xbf\x00'
+		return None
 
-			#print('(%s, %s, %s)' % (arch_name, addr, assembly))
-			encoding, count = ks.asm(assembly)
+	def reassemble(self):
+		try:
+			(ks, assembly, addr) = (self.ks(), self.asm(), self.addr())
+			encoding, count = ks.asm(assembly, addr)
 			self.qle_encoding.setText(' '.join(['%02X'%x for x in encoding]))
 			self.qle_size.setText('%d' % count)
 		except ValueError:
@@ -230,13 +275,24 @@ class PatcherDialog(QDialog):
 			self.qle_encoding.home(True)
 
 	def patch(self):
+		data = self.data()
+
+		# fill with NOP's?
 		try:
-			addr = int(self.qle_address.text(), 16)
-			values = [int(x, 16) for x in self.qle_encoding.text().split(' ')]
-			data = bytes(values)
-			self.context.binaryView.write(addr, data)
+			if self.check_nops.isChecked():
+				length = disassemble_length_until(self.bv(), self.addr(), len(data))
+				if length > len(data):
+					nop = self.nop()
+					sled = (length // len(nop)) * nop
+					data = data + sled[len(data):]
+		except Exception:
+			pass
+
+		try:
+			self.bv().write(self.addr(), data)
 		except Exception as e:
 			print(e)
+			return
 
 	def cancel(self):
 		self.close()
