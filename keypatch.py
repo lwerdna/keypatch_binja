@@ -45,6 +45,26 @@ architecture_infos = [
 	('evm', 'Ethereum Virtual Machine', KS_ARCH_EVM, 0)
 ]
 
+# map binary ninja architecture name to ks architecture name
+# [x.name for x in binaryninja.Architecture]
+binja_to_ks = {
+	'aarch64': 'x64',
+	'armv7': 'arm',
+	'armv7eb': 'armbe',
+	'thumb2': 'thumb',
+	'thumb2eb': 'thumbbe',
+	'mipsel32': 'mips',
+	'mips32': 'mipsbe',
+	'ppc': 'ppc32be',
+	#'ppc_le',
+	'ppc64': 'ppc64be',
+	'ppc64_le': 'ppc64',
+	#'sh4',
+	'x86_16': 'x16',
+	'x86': 'x32',
+	'x86_64': 'x64'
+}
+
 architecture_to_ks = {}
 
 for (name, descr, arch_const, mode_const) in architecture_infos:
@@ -82,6 +102,11 @@ class PatcherDialog(QDialog):
 		for (name, descr, arch_const, mode_const) in architecture_infos:
 			line = '%s: %s' % (name, descr)
 			self.qcb_arch.addItem(line)
+		# attempt to initialize the architecture with the binary view's architecture
+		bv_arch_name = context.binaryView.arch.name
+		ks_arch_name = binja_to_ks.get(bv_arch_name, 'x64')
+		self.qcb_arch.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
+
 		self.qcb_arch.currentTextChanged.connect(self.reassemble)
 
 		self.qle_address = QLineEdit('00000000')
