@@ -10,6 +10,10 @@ from keystone import *
 from binaryninja.interaction import show_message_box
 from binaryninja.enums import MessageBoxButtonSet, MessageBoxIcon
 
+#------------------------------------------------------------------------------
+# lookups
+#------------------------------------------------------------------------------
+
 # (name, description, arch, mode, option)
 architecture_infos = [
 	('x16', 'X86 16bit, Intel syntax', KS_ARCH_X86, KS_MODE_16),
@@ -45,28 +49,8 @@ architecture_infos = [
 	('evm', 'Ethereum Virtual Machine', KS_ARCH_EVM, 0)
 ]
 
-# map binary ninja architecture name to ks architecture name
-# [x.name for x in binaryninja.Architecture]
-binja_to_ks = {
-	'aarch64': 'x64',
-	'armv7': 'arm',
-	'armv7eb': 'armbe',
-	'thumb2': 'thumb',
-	'thumb2eb': 'thumbbe',
-	'mipsel32': 'mips',
-	'mips32': 'mipsbe',
-	'ppc': 'ppc32be',
-	#'ppc_le',
-	'ppc64': 'ppc64be',
-	'ppc64_le': 'ppc64',
-	#'sh4',
-	'x86_16': 'x16',
-	'x86': 'x32',
-	'x86_64': 'x64'
-}
-
+# map architecture name to keystone context
 architecture_to_ks = {}
-
 for (name, descr, arch_const, mode_const) in architecture_infos:
 	# default is little endian
 	# decide whether to set big endian
@@ -88,6 +72,65 @@ for (name, descr, arch_const, mode_const) in architecture_infos:
 
 	architecture_to_ks[name] = ks
 
+# map binary ninja architecture name to ks architecture name
+# [x.name for x in binaryninja.Architecture]
+binja_to_ks = {
+	'aarch64': 'arm64',
+	'armv7': 'arm',
+	'armv7eb': 'armbe',
+	'thumb2': 'thumb',
+	'thumb2eb': 'thumbbe',
+	'mipsel32': 'mips',
+	'mips32': 'mipsbe',
+	'ppc': 'ppc32be',
+	#'ppc_le',
+	'ppc64': 'ppc64be',
+	'ppc64_le': 'ppc64',
+	#'sh4',
+	'x86_16': 'x16nasm',
+	'x86': 'x32nasm',
+	'x86_64': 'x64nasm'
+}
+
+#------------------------------------------------------------------------------
+# utilities
+#------------------------------------------------------------------------------
+
+# test if given address is valid binaryview address, by searching sections
+def is_valid_addr(bview, addr):
+	for sname in bview.sections:
+		section = bview.sections[sname]
+		start = section.start
+		end = section.start + len(section)
+		if addr >= start and addr < end:
+			return True
+	return False
+
+# given a valid address, return least address after the valid that is invalid
+def get_invalid_addr(bview, addr):
+	for sname in bview.sections:
+		section = bview.sections[sname]
+		start = section.start
+		end = section.start + len(section)
+		if addr >= start and addr < end:
+			return end
+	raise Exception('0x%X is not a valid address' % addr)
+
+def disassemble_binja_single(bview, addr):
+	end = get_invalid_addr(bview, addr)
+	length = min(16, end - addr)
+	data = bview.read(addr, length)
+	(tokens, length) = bview.arch.get_instruction_text(data, addr)
+	if not tokens or not length:
+		raise Exception('disassembly of %s failed' % str(data))
+	strs = [t.text for t in tokens]
+	strs = [' ' if s.isspace() else s for s in strs]
+	return (''.join(strs), length)
+
+#------------------------------------------------------------------------------
+# patcher tool
+#------------------------------------------------------------------------------
+
 class PatcherDialog(QDialog):
 	def __init__(self, context, parent=None):
 		super(PatcherDialog, self).__init__(parent)
@@ -102,19 +145,10 @@ class PatcherDialog(QDialog):
 		for (name, descr, arch_const, mode_const) in architecture_infos:
 			line = '%s: %s' % (name, descr)
 			self.qcb_arch.addItem(line)
-		# attempt to initialize the architecture with the binary view's architecture
-		bv_arch_name = context.binaryView.arch.name
-		ks_arch_name = binja_to_ks.get(bv_arch_name, 'x64')
-		self.qcb_arch.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
-
-		self.qcb_arch.currentTextChanged.connect(self.reassemble)
 
 		self.qle_address = QLineEdit('00000000')
-		self.qle_address.setText(hex(self.context.address))
 
-		self.qle_address.textChanged.connect(self.reassemble)
 		self.qle_assembly = QLineEdit('nop')
-		self.qle_assembly.textChanged.connect(self.reassemble)
 		self.qle_encoding = QLineEdit()
 		self.qle_encoding.setReadOnly(True)
 		self.qle_size = QLineEdit()
@@ -124,9 +158,7 @@ class PatcherDialog(QDialog):
 		check_save_original = QCheckBox('Save original instructions in binja comment')
 		check_save_original.setChecked(True)
 		btn_cancel = QPushButton('Cancel')
-		btn_cancel.clicked.connect(self.cancel)
 		btn_patch = QPushButton('Patch')
-		btn_patch.clicked.connect(self.patch)
 
 		layoutF.addRow('Architecture:', self.qcb_arch)
 		layoutF.addRow('Address:', self.qle_address)
@@ -137,7 +169,38 @@ class PatcherDialog(QDialog):
 		layoutF.addRow(check_save_original)
 		layoutF.addRow(btn_cancel, btn_patch)
 
-		self.reassemble()
+		# initialize fields
+		# initialize address
+		self.qle_address.setText(hex(self.context.address))
+
+		# initialize architecture
+		bv_arch_name = context.binaryView.arch.name
+		ks_arch_name = binja_to_ks.get(bv_arch_name, 'x64')
+		self.qcb_arch.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
+
+		# initialize disassembly
+		ok = False
+		try:
+			(instxt, length) = disassemble_binja_single(context.binaryView, context.address)
+			self.qle_assembly.setText(instxt)
+			self.qle_size.setText('%d' % length)
+			data = context.binaryView.read(context.address, length)
+			self.qle_encoding.setText(' '.join(['%02X'%x for x in data]))
+			ok = True
+		except Exception as e:
+			print(e)
+			pass
+
+		if not ok:
+			self.qle_assembly.setText('nop')
+			self.reassemble()
+
+		# connect everything
+		self.qcb_arch.currentTextChanged.connect(self.reassemble)
+		self.qle_address.textChanged.connect(self.reassemble)
+		self.qle_assembly.textChanged.connect(self.reassemble)
+		btn_cancel.clicked.connect(self.cancel)
+		btn_patch.clicked.connect(self.patch)
 
 	def reassemble(self):
 		do_clear = False
@@ -179,7 +242,7 @@ class PatcherDialog(QDialog):
 		self.close()
 
 #------------------------------------------------------------------------------
-# main
+# exported functions
 #------------------------------------------------------------------------------
 
 # input: binaryninjaui.UIActionContext (struct UIActionContext from api/ui/action.h)
