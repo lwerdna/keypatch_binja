@@ -292,10 +292,22 @@ class PatcherDialog(QDialog):
 		except Exception:
 			pass
 
+		comment = None
 		try:
-			self.bv().write(self.addr(), data)
+			if self.check_save_original.isChecked():
+				(instxt, length) = disassemble_binja_single(self.bv(), self.addr())
+				comment = 'Keypatch modified this from: ' + instxt
 		except Exception as e:
 			print(e)
+			pass
+
+		try:
+			self.bv().write(self.addr(), data)
+
+			if comment:
+				print('setting comment at address 0x%X to %s' % (self.addr(), comment))
+				self.bv().set_comment_at(self.addr(), comment)
+		except Exception as e:
 			return
 
 	def cancel(self):
