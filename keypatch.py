@@ -142,83 +142,52 @@ def disassemble_length_until(bview, addr, limit):
 	return result
 
 #------------------------------------------------------------------------------
-# patcher tool
+# keypatch dialog parent class
 #------------------------------------------------------------------------------
 
-class PatcherDialog(QDialog):
+class KeypatchDialog(QDialog):
 	def __init__(self, context, parent=None):
-		super(PatcherDialog, self).__init__(parent)
+		super(KeypatchDialog, self).__init__(parent)
 		self.context = context
 
-		self.setWindowTitle('KEYPATCH:: Patcher')
-
-		layoutF = QFormLayout()
-		self.setLayout(layoutF)
-
-		self.qcb_arch = QComboBox()
+		# set up the architecture
+		combobox = QComboBox()
 		for (name, descr, arch_const, mode_const) in architecture_infos:
 			line = '%s: %s' % (name, descr)
-			self.qcb_arch.addItem(line)
+			combobox.addItem(line)
 
-		self.qle_address = QLineEdit('00000000')
-
-		self.qle_assembly = QLineEdit('nop')
-		self.qle_encoding = QLineEdit()
-		self.qle_encoding.setReadOnly(True)
-		self.qle_size = QLineEdit()
-		self.qle_size.setReadOnly(True)
-		self.check_nops = QCheckBox('NOPs padding until next instruction boundary')
-		self.check_nops.setChecked(True)
-		self.check_save_original = QCheckBox('Save original instructions in binja comment')
-		self.check_save_original.setChecked(True)
-		btn_cancel = QPushButton('Cancel')
-		btn_patch = QPushButton('Patch')
-
-		layoutF.addRow('Architecture:', self.qcb_arch)
-		layoutF.addRow('Address:', self.qle_address)
-		layoutF.addRow('&Assembly:', self.qle_assembly)
-		layoutF.addRow('Encoding:', self.qle_encoding)
-		layoutF.addRow('Size:', self.qle_size)
-		layoutF.addRow(self.check_nops)
-		layoutF.addRow(self.check_save_original)
-		layoutF.addRow(btn_patch, btn_cancel)
-
-		# initialize fields
-		# initialize address
-		self.qle_address.setText(hex(self.context.address))
-
-		# initialize architecture
 		bv_arch_name = context.binaryView.arch.name
 		ks_arch_name = binja_to_ks.get(bv_arch_name, 'x64')
-		self.qcb_arch.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
+		combobox.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
 
-		# initialize disassembly
+		self.qcb_arch = combobox
+
+		# set up the address
+		ledit = QLineEdit('00000000')
+		ledit.setText(hex(self.context.address))
+		self.qle_address = ledit
+
+		# set up assembly fields
+		self.qle_assembly = QLineEdit()
+		self.qle_asm_size = QLineEdit()
+		self.qle_asm_size.setReadOnly(True)
+		self.qle_encoding = QLineEdit()
+		self.qle_encoding.setReadOnly(True)
+
 		ok = False
 		try:
 			(instxt, length) = disassemble_binja_single(context.binaryView, context.address)
 			self.qle_assembly.setText(instxt)
-			self.qle_size.setText('%d' % length)
+			self.qle_asm_size.setText('%d' % length)
 			data = context.binaryView.read(context.address, length)
 			self.qle_encoding.setText(' '.join(['%02X'%x for x in data]))
 			ok = True
 		except Exception as e:
 			print(e)
 			pass
-
 		if not ok:
 			self.qle_assembly.setText('nop')
 			self.reassemble()
-
-		# connect everything
-		self.qcb_arch.currentTextChanged.connect(self.reassemble)
-		self.qle_address.textChanged.connect(self.reassemble)
-		self.qle_assembly.textChanged.connect(self.reassemble)
-		btn_cancel.clicked.connect(self.cancel)
-		btn_patch.clicked.connect(self.patch)
-
-		# set defaults
-		self.qle_assembly.setFocus()
-		btn_patch.setDefault(True)
 
 	#
 	# accessors
@@ -265,18 +234,61 @@ class PatcherDialog(QDialog):
 			(ks, assembly, addr) = (self.ks(), self.asm(), self.addr())
 			encoding, count = ks.asm(assembly, addr)
 			self.qle_encoding.setText(' '.join(['%02X'%x for x in encoding]))
-			self.qle_size.setText('%d' % len(encoding))
+			self.qle_asm_size.setText('%d' % len(encoding))
 		except ValueError:
-			self.qle_size.setText('')
+			self.qle_asm_size.setText('')
 			self.qle_encoding.setText('invalid address')
 		except KsError as e:
-			self.qle_size.setText('')
+			self.qle_asm_size.setText('')
 			self.qle_encoding.setText(str(e))
 			self.qle_encoding.home(True)
 		except Exception as e:
-			self.qle_size.setText('')
+			self.qle_asm_size.setText('')
 			self.qle_encoding.setText(str(e))
 			self.qle_encoding.home(True)
+
+	def cancel(self):
+		self.close()
+
+#------------------------------------------------------------------------------
+# patcher tool
+#------------------------------------------------------------------------------
+
+class PatcherDialog(KeypatchDialog):
+	def __init__(self, context, parent=None):
+		super(PatcherDialog, self).__init__(context, parent)
+
+		self.setWindowTitle('KEYPATCH:: Patcher')
+
+		layoutF = QFormLayout()
+		self.setLayout(layoutF)
+
+		self.check_nops = QCheckBox('NOPs padding until next instruction boundary')
+		self.check_nops.setChecked(True)
+		self.check_save_original = QCheckBox('Save original instructions in binja comment')
+		self.check_save_original.setChecked(True)
+		btn_cancel = QPushButton('Cancel')
+		btn_patch = QPushButton('Patch')
+
+		layoutF.addRow('Architecture:', self.qcb_arch)
+		layoutF.addRow('Address:', self.qle_address)
+		layoutF.addRow('&Assembly:', self.qle_assembly)
+		layoutF.addRow('Encoding:', self.qle_encoding)
+		layoutF.addRow('Size:', self.qle_asm_size)
+		layoutF.addRow(self.check_nops)
+		layoutF.addRow(self.check_save_original)
+		layoutF.addRow(btn_patch, btn_cancel)
+
+		# connect everything
+		self.qcb_arch.currentTextChanged.connect(self.reassemble)
+		self.qle_address.textChanged.connect(self.reassemble)
+		self.qle_assembly.textChanged.connect(self.reassemble)
+		btn_cancel.clicked.connect(self.cancel)
+		btn_patch.clicked.connect(self.patch)
+
+		# set defaults
+		self.qle_assembly.setFocus()
+		btn_patch.setDefault(True)
 
 	def patch(self):
 		data = self.data()
@@ -296,7 +308,7 @@ class PatcherDialog(QDialog):
 		try:
 			if self.check_save_original.isChecked():
 				(instxt, length) = disassemble_binja_single(self.bv(), self.addr())
-				comment = 'Keypatch modified this from: ' + instxt
+				comment = instxt
 		except Exception as e:
 			print(e)
 			pass
@@ -305,13 +317,109 @@ class PatcherDialog(QDialog):
 			self.bv().write(self.addr(), data)
 
 			if comment:
-				print('setting comment at address 0x%X to %s' % (self.addr(), comment))
 				self.bv().set_comment_at(self.addr(), comment)
 		except Exception as e:
 			return
 
-	def cancel(self):
-		self.close()
+#------------------------------------------------------------------------------
+# fill range tool
+#------------------------------------------------------------------------------
+
+class FillRangeDialog(KeypatchDialog):
+	def __init__(self, context, parent=None):
+		super(FillRangeDialog, self).__init__(context, parent)
+
+		self.setWindowTitle('KEYPATCH:: Fill Range')
+
+		layoutF = QFormLayout()
+		self.setLayout(layoutF)
+
+		self.qle_end = QLineEdit('00000000')
+		self.qle_fill_size = QLineEdit()
+		self.qle_fill_size.setReadOnly(True)
+
+		btn_cancel = QPushButton('Cancel')
+		btn_patch = QPushButton('Patch')
+
+		layoutF.addRow('Architecture:', self.qcb_arch)
+		layoutF.addRow('Start:', self.qle_address)
+		layoutF.addRow('End:', self.qle_end)
+		layoutF.addRow('&Assembly:', self.qle_assembly)
+		layoutF.addRow('Encoding:', self.qle_encoding)
+		layoutF.addRow('Asm Size:', self.qle_asm_size)
+		layoutF.addRow('Fill Size:', self.qle_fill_size)
+		layoutF.addRow(btn_patch, btn_cancel)
+
+		# connect everything
+		self.qcb_arch.currentTextChanged.connect(self.reassemble)
+		self.qle_assembly.textChanged.connect(self.reassemble)
+
+		self.qle_address.textChanged.connect(self.interval_changed)
+		self.qle_end.textChanged.connect(self.interval_changed)
+
+		btn_cancel.clicked.connect(self.cancel)
+		btn_patch.clicked.connect(self.fill)
+
+		# set defaults
+		self.qle_end.setText(hex(get_invalid_addr(self.bv(), self.addr())))
+		self.qle_fill_size.setText(hex(len(self.interval())-1))
+		self.qle_assembly.setFocus()
+		btn_patch.setDefault(True)
+
+	def interval(self):
+		(a, b) = (0, 0)
+		try:
+			a = int(self.qle_address.text(), 16)
+		except Exception:
+			pass
+		try:
+			b = int(self.qle_end.text(), 16)
+		except Exception:
+			pass
+		return range(a, b)
+
+	def interval_changed(self):
+		length = len(self.interval())-1
+		if length < 0:
+			self.qle_fill_size.setText('ERROR: interval is negative')
+		elif length == 0:
+			self.qle_fill_size.setText('ERROR: interval is empty')
+		else:
+			self.qle_fill_size.setText(hex(length))
+
+	def fill(self):
+		data = self.data()
+		a = int(self.qle_address.text(), 16)
+		b = int(self.qle_end.text(), 16)
+		total = b - a - 1
+
+		# fill with NOP's?
+		try:
+			if self.check_nops.isChecked():
+				length = disassemble_length_until(self.bv(), self.addr(), len(data))
+				if length > len(data):
+					nop = self.nop()
+					sled = (length // len(nop)) * nop
+					data = data + sled[len(data):]
+		except Exception:
+			pass
+
+		comment = None
+		try:
+			if self.check_save_original.isChecked():
+				(instxt, length) = disassemble_binja_single(self.bv(), self.addr())
+				comment = instxt
+		except Exception as e:
+			print(e)
+			pass
+
+		try:
+			self.bv().write(self.addr(), data)
+
+			if comment:
+				self.bv().set_comment_at(self.addr(), comment)
+		except Exception as e:
+			return
 
 #------------------------------------------------------------------------------
 # exported functions
@@ -326,3 +434,10 @@ def launch_patcher(context):
 	dlg = PatcherDialog(context)
 	dlg.exec_()
 
+def launch_fill_range(context):
+	if context.binaryView == None:
+		show_message_box('KEYPATCH', 'no binary', MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
+		return
+
+	dlg = FillRangeDialog(context)
+	dlg.exec_()
