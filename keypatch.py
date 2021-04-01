@@ -2,6 +2,7 @@
 
 # python stdlib stuff
 import sys
+import math
 # Qt stuff
 from PySide2.QtWidgets import *
 # keystone stuff
@@ -141,6 +142,13 @@ def disassemble_length_until(bview, addr, limit):
 		result += tmp
 	return result
 
+def error(msg):
+	show_message_box('KEYPATCH', msg, \
+	  MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
+
+def bytes_to_str(data):
+	return ' '.join(['%02X'%x for x in data])
+
 #------------------------------------------------------------------------------
 # keypatch dialog parent class
 #------------------------------------------------------------------------------
@@ -272,7 +280,7 @@ class PatcherDialog(KeypatchDialog):
 
 		layoutF.addRow('Architecture:', self.qcb_arch)
 		layoutF.addRow('Address:', self.qle_address)
-		layoutF.addRow('&Assembly:', self.qle_assembly)
+		layoutF.addRow('Assembly:', self.qle_assembly)
 		layoutF.addRow('Encoding:', self.qle_encoding)
 		layoutF.addRow('Size:', self.qle_asm_size)
 		layoutF.addRow(self.check_nops)
@@ -331,95 +339,181 @@ class FillRangeDialog(KeypatchDialog):
 
 		self.setWindowTitle('KEYPATCH:: Fill Range')
 
-		layoutF = QFormLayout()
-		self.setLayout(layoutF)
+		# this widget is VBox of QGroupBox
+		layoutV = QVBoxLayout()
+		self.setLayout(layoutV)
 
 		self.qle_end = QLineEdit('00000000')
+		self.qle_bytes = QLineEdit('DE AD BE EF')
 		self.qle_fill_size = QLineEdit()
 		self.qle_fill_size.setReadOnly(True)
+		self.qle_preview = QLineEdit()
+		self.qle_preview.setReadOnly(True)
 
 		btn_cancel = QPushButton('Cancel')
 		btn_patch = QPushButton('Patch')
 
-		layoutF.addRow('Architecture:', self.qcb_arch)
-		layoutF.addRow('Start:', self.qle_address)
-		layoutF.addRow('End:', self.qle_end)
-		layoutF.addRow('&Assembly:', self.qle_assembly)
-		layoutF.addRow('Encoding:', self.qle_encoding)
-		layoutF.addRow('Asm Size:', self.qle_asm_size)
-		layoutF.addRow('Fill Size:', self.qle_fill_size)
-		layoutF.addRow(btn_patch, btn_cancel)
+		groupbox = QGroupBox('range:')
+		horiz = QHBoxLayout()
+		horiz.addWidget(QLabel('['))
+		horiz.addWidget(self.qle_address)
+		horiz.addWidget(QLabel(','))
+		horiz.addWidget(self.qle_end)
+		horiz.addWidget(QLabel(')'))
+		groupbox.setLayout(horiz)
+		layoutV.addWidget(groupbox)
+
+		self.group_a = QGroupBox('assemble:')
+		self.group_a.setCheckable(True)
+		form = QFormLayout()
+		form.addRow('Architecture:', self.qcb_arch)
+		form.addRow('Assembly:', self.qle_assembly)
+		form.addRow('Encoding:', self.qle_encoding)
+		self.group_a.setLayout(form)
+		layoutV.addWidget(self.group_a)
+
+		self.group_m = QGroupBox('manual:')
+		self.group_m.setCheckable(True)
+		form = QFormLayout()
+		form.addRow('Bytes:', self.qle_bytes)
+		self.group_m.setLayout(form)
+		layoutV.addWidget(self.group_m)
+
+		form = QFormLayout()
+		form.addRow('Preview:', self.qle_preview)
+		form.addRow(btn_patch, btn_cancel)
+		layoutV.addLayout(form)
 
 		# connect everything
 		self.qcb_arch.currentTextChanged.connect(self.reassemble)
 		self.qle_assembly.textChanged.connect(self.reassemble)
+		self.qle_encoding.textChanged.connect(self.preview)
 
-		self.qle_address.textChanged.connect(self.interval_changed)
-		self.qle_end.textChanged.connect(self.interval_changed)
+		self.qle_address.textChanged.connect(self.preview)
+		self.qle_end.textChanged.connect(self.preview)
+
+		self.group_a.toggled.connect(self.assembly_checked_toggle)
+		self.group_m.toggled.connect(self.manual_checked_toggle)
+
+		self.qle_bytes.textChanged.connect(self.preview)
 
 		btn_cancel.clicked.connect(self.cancel)
 		btn_patch.clicked.connect(self.fill)
 
 		# set defaults
+		self.group_a.setCheckable(True)
+		self.group_m.setChecked(False)
+
 		self.qle_end.setText(hex(get_invalid_addr(self.bv(), self.addr())))
-		self.qle_fill_size.setText(hex(len(self.interval())-1))
 		self.qle_assembly.setFocus()
 		btn_patch.setDefault(True)
 
+	# report error to the preview field
+	def error(self, msg):
+		self.qle_preview.setText('ERROR: ' + msg)
+
+	# get the left, right, and length of the entered fill interval
 	def interval(self):
 		(a, b) = (0, 0)
+		errval = (None, None, None)
+
 		try:
 			a = int(self.qle_address.text(), 16)
 		except Exception:
-			pass
+			self.error('malformed number: %s' % self.qle_address.text())
+			return errval
+
 		try:
 			b = int(self.qle_end.text(), 16)
 		except Exception:
-			pass
-		return range(a, b)
+			return errval
 
-	def interval_changed(self):
-		length = len(self.interval())-1
-		if length < 0:
-			self.qle_fill_size.setText('ERROR: interval is negative')
-		elif length == 0:
-			self.qle_fill_size.setText('ERROR: interval is empty')
+		if (a,b) == (0, 0):
+			# starting condition
+			return errval
+
+		if a == b-1:
+			self.error('empty interval')
+			return errval
+
+		if a > b-1:
+			self.error('negative interval')
+			return errval
+
+		if b - a > (16*1024*1024):
+			self.error('too large (>16mb) interval')
+			return errval
+
+		return (a, b, b-a)
+
+	# get the data (as bytes) from either:
+	# - assembled bytes or manually
+	# - manually entered bytes
+	def data(self):
+		hexchars = '0123456789ABCDEFabcdef'
+
+		text = None
+		if self.group_a.isChecked():
+			text = self.qle_encoding.text()
+		if self.group_m.isChecked():
+			text = self.qle_bytes.text()
+
+		buf = b''
+		for bstr in text.split(' '):
+			if bstr.startswith('0x'):
+				bstr = bstr[2:]
+			if len(bstr) != 2 or \
+			  not bstr[0] in hexchars or \
+			  not bstr[1] in hexchars:
+				self.error('malformed byte: %s' % bstr)
+				return None
+			buf += bytes([int(bstr, 16)])
+
+		return buf
+
+	def assembly_checked_toggle(self, is_check):
+		self.group_m.setChecked(not is_check)
+		self.preview()
+
+	def manual_checked_toggle(self, is_check):
+		self.group_a.setChecked(not is_check)
+		self.preview()
+
+	def preview(self):
+		(_, _, length) = self.interval()
+		if not length: return None
+		data = self.data()
+		if not data: return None
+
+		if length <= 8:
+			self.qle_preview.setText(bytes_to_str(data))
 		else:
-			self.qle_fill_size.setText(hex(length))
+			head = data * math.ceil(6/len(data))
+			idx = len(data) + (length % len(data)) - 2
+			tail = (data+data)[idx:idx+2]
+			self.qle_preview.setText(bytes_to_str(head) + ' ... ' + bytes_to_str(tail))
 
 	def fill(self):
+		# get, validate the interval
+		(left, right, length) = self.interval()
+		if left == None: return None
+		for a in [left, right]:
+			if not is_valid_addr(self.bv(), a):
+				self.error('0x%X invalid write address' % left)
+				return
+
+		# get, validate data
 		data = self.data()
-		a = int(self.qle_address.text(), 16)
-		b = int(self.qle_end.text(), 16)
-		total = b - a - 1
+		if not data: return None
 
-		# fill with NOP's?
-		try:
-			if self.check_nops.isChecked():
-				length = disassemble_length_until(self.bv(), self.addr(), len(data))
-				if length > len(data):
-					nop = self.nop()
-					sled = (length // len(nop)) * nop
-					data = data + sled[len(data):]
-		except Exception:
-			pass
+		# form the final write
+		while len(data) < length:
+			data = data*2
+		data = data[0:length]
 
-		comment = None
-		try:
-			if self.check_save_original.isChecked():
-				(instxt, length) = disassemble_binja_single(self.bv(), self.addr())
-				comment = instxt
-		except Exception as e:
-			print(e)
-			pass
-
-		try:
-			self.bv().write(self.addr(), data)
-
-			if comment:
-				self.bv().set_comment_at(self.addr(), comment)
-		except Exception as e:
-			return
+		# write it
+		print('writing %d bytes to 0x%X' % (len(data), left))
+		self.bv().write(left, data)
 
 #------------------------------------------------------------------------------
 # exported functions
@@ -428,7 +522,7 @@ class FillRangeDialog(KeypatchDialog):
 # input: binaryninjaui.UIActionContext (struct UIActionContext from api/ui/action.h)
 def launch_patcher(context):
 	if context.binaryView == None:
-		show_message_box('KEYPATCH', 'no binary', MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
+		error('no binary')
 		return
 
 	dlg = PatcherDialog(context)
@@ -436,7 +530,7 @@ def launch_patcher(context):
 
 def launch_fill_range(context):
 	if context.binaryView == None:
-		show_message_box('KEYPATCH', 'no binary', MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
+		error('no binary')
 		return
 
 	dlg = FillRangeDialog(context)
