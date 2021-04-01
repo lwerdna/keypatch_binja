@@ -181,7 +181,7 @@ class PatcherDialog(QDialog):
 		layoutF.addRow('Size:', self.qle_size)
 		layoutF.addRow(self.check_nops)
 		layoutF.addRow(self.check_save_original)
-		layoutF.addRow(btn_cancel, btn_patch)
+		layoutF.addRow(btn_patch, btn_cancel)
 
 		# initialize fields
 		# initialize address
@@ -215,6 +215,10 @@ class PatcherDialog(QDialog):
 		self.qle_assembly.textChanged.connect(self.reassemble)
 		btn_cancel.clicked.connect(self.cancel)
 		btn_patch.clicked.connect(self.patch)
+
+		# set defaults
+		self.qle_assembly.setFocus()
+		btn_patch.setDefault(True)
 
 	#
 	# accessors
@@ -261,7 +265,7 @@ class PatcherDialog(QDialog):
 			(ks, assembly, addr) = (self.ks(), self.asm(), self.addr())
 			encoding, count = ks.asm(assembly, addr)
 			self.qle_encoding.setText(' '.join(['%02X'%x for x in encoding]))
-			self.qle_size.setText('%d' % count)
+			self.qle_size.setText('%d' % len(encoding))
 		except ValueError:
 			self.qle_size.setText('')
 			self.qle_encoding.setText('invalid address')
