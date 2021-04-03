@@ -179,8 +179,10 @@ class KeypatchDialog(QDialog):
 		self.qle_assembly = QLineEdit()
 		self.qle_asm_size = QLineEdit()
 		self.qle_asm_size.setReadOnly(True)
+		self.qle_asm_size.setEnabled(False)
 		self.qle_encoding = QLineEdit()
 		self.qle_encoding.setReadOnly(True)
+		self.qle_encoding.setEnabled(False)
 
 		ok = False
 		try:
@@ -347,11 +349,13 @@ class FillRangeDialog(KeypatchDialog):
 		self.qle_bytes = QLineEdit('DE AD BE EF')
 		self.qle_fill_size = QLineEdit()
 		self.qle_fill_size.setReadOnly(True)
+		self.qle_fill_size.setEnabled(False)
 		self.qle_preview = QLineEdit()
 		self.qle_preview.setReadOnly(True)
+		self.qle_preview.setEnabled(False)
 
 		btn_cancel = QPushButton('Cancel')
-		btn_patch = QPushButton('Patch')
+		btn_fill = QPushButton('Fill')
 
 		groupbox = QGroupBox('range:')
 		horiz = QHBoxLayout()
@@ -381,7 +385,7 @@ class FillRangeDialog(KeypatchDialog):
 
 		form = QFormLayout()
 		form.addRow('Preview:', self.qle_preview)
-		form.addRow(btn_patch, btn_cancel)
+		form.addRow(btn_fill, btn_cancel)
 		layoutV.addLayout(form)
 
 		# connect everything
@@ -398,7 +402,7 @@ class FillRangeDialog(KeypatchDialog):
 		self.qle_bytes.textChanged.connect(self.preview)
 
 		btn_cancel.clicked.connect(self.cancel)
-		btn_patch.clicked.connect(self.fill)
+		btn_fill.clicked.connect(self.fill)
 
 		# set defaults
 		self.group_a.setCheckable(True)
@@ -406,7 +410,7 @@ class FillRangeDialog(KeypatchDialog):
 
 		self.qle_end.setText(hex(get_invalid_addr(self.bv(), self.addr())))
 		self.qle_assembly.setFocus()
-		btn_patch.setDefault(True)
+		btn_fill.setDefault(True)
 
 	# report error to the preview field
 	def error(self, msg):
@@ -497,9 +501,9 @@ class FillRangeDialog(KeypatchDialog):
 		# get, validate the interval
 		(left, right, length) = self.interval()
 		if left == None: return None
-		for a in [left, right]:
+		for a in [left, right-1]:
 			if not is_valid_addr(self.bv(), a):
-				self.error('0x%X invalid write address' % left)
+				self.error('0x%X invalid write address' % a)
 				return
 
 		# get, validate data
