@@ -6,6 +6,7 @@ import sys
 import math
 # Qt stuff
 from PySide2.QtWidgets import *
+from PySide2.QtGui import QFont
 # keystone stuff
 from keystone import *
 # binaryninja
@@ -94,6 +95,9 @@ binja_to_ks = {
 	'x86': 'x32nasm',
 	'x86_64': 'x64nasm'
 }
+
+font_mono = QFont('Courier New')
+font_mono.setStyleHint(QFont.TypeWriter)
 
 #------------------------------------------------------------------------------
 # utilities
@@ -347,7 +351,7 @@ class FillRangeDialog(KeypatchDialog):
 		self.setLayout(layoutV)
 
 		self.qle_end = QLineEdit('00000000')
-		self.qle_bytes = QLineEdit('DE AD BE EF')
+		self.qle_bytes = QLineEdit()
 		self.qle_fill_size = QLineEdit()
 		self.qle_fill_size.setReadOnly(True)
 		self.qle_fill_size.setEnabled(False)
@@ -403,7 +407,7 @@ class FillRangeDialog(KeypatchDialog):
 		btn_fill.clicked.connect(self.fill)
 
 		# set defaults
-		self.group_a.setCheckable(True)
+		self.group_a.setChecked(True)
 		self.group_m.setChecked(False)
 
 		self.qle_end.setText(hex(get_invalid_addr(self.bv(), self.addr())))
@@ -556,7 +560,14 @@ class SearchDialog(KeypatchDialog):
 		self.group_m.setLayout(horiz)
 		layoutV.addWidget(self.group_m)
 
+		# button
 		layoutV.addWidget(btn_search)
+
+		# search results
+		self.list_results = QListWidget()
+		self.list_results.setFont(font_mono)
+		self.list_results.hide()
+		layoutV.addWidget(self.list_results)
 
 		form = QFormLayout()
 		layoutV.addLayout(form)
@@ -570,9 +581,16 @@ class SearchDialog(KeypatchDialog):
 
 		btn_search.clicked.connect(self.search)
 
+		self.list_results.itemDoubleClicked.connect(self.results_clicked)
+
 		# set defaults
-		self.group_a.setCheckable(True)
-		self.group_m.setChecked(False)
+		self.group_a.setChecked(False)
+		self.group_m.setChecked(True)
+
+		tmp = self.qle_encoding.text()
+		if not re.match(r'^[a-fA-F0-9 ]+$', tmp):
+			tmp = 'DE AD BE EF'
+		self.qle_bytes.setText(tmp)
 
 		self.qle_end.setText(hex(get_invalid_addr(self.bv(), self.addr())))
 		self.qle_assembly.setFocus()
@@ -608,22 +626,34 @@ class SearchDialog(KeypatchDialog):
 		try:
 			regobj = re.compile(regex)
 		except Exception:
-			print('error: invalid regex' % regex)
+			error('invalid regex: %s' % sexpr)
 			return
+
+		# clear old results
+		self.list_results.clear()
+		self.list_results.show()
 
 		# loop through each section, searching it
 		bview = self.bv()
+		width = max([len(sname) for sname in bview.sections])
 		for sname in bview.sections:
 			section = bview.sections[sname]
 			start = section.start
 			end = section.start + len(section)
-			print('searching section %s [0x%X, 0x%X)' % (sname, start, end))
+			#print('searching section %s [0x%X, 0x%X)' % (sname, start, end))
 
 			# TODO: find better way
 			buf = ''.join([chr(x) for x in bview.read(start, end-start)])
 			for m in regobj.finditer(buf):
 				addr = section.start + m.start()
-				print('0x%X: %s' % (addr, strbytes_pretty(m.group())))
+				info = '%s %08X: %s' % (sname.rjust(width), addr, strbytes_pretty(m.group()))
+				self.list_results.addItem(QListWidgetItem(info))
+
+	def results_clicked(self, item):
+		#print('you double clicked %s' % item.text())
+		m = re.match(r'^.* ([a-fA-F0-9]+):', item.text())
+		addr = int(m.group(1), 16)
+		self.bv().navigate(self.bv().view, addr)
 
 #------------------------------------------------------------------------------
 # exported functions
