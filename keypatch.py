@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 # python stdlib stuff
+import re
 import sys
 import math
 # Qt stuff
@@ -14,6 +15,7 @@ from binaryninja.enums import MessageBoxButtonSet, MessageBoxIcon
 #------------------------------------------------------------------------------
 # lookups
 #------------------------------------------------------------------------------
+hexchars = '0123456789ABCDEFabcdef'
 
 # (name, description, arch, mode, option)
 architecture_infos = [
@@ -146,8 +148,12 @@ def error(msg):
 	show_message_box('KEYPATCH', msg, \
 	  MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
 
+# b'\xaa\xbb\xcc\xdd' -> 'AA BB CC DD'
 def bytes_to_str(data):
 	return ' '.join(['%02X'%x for x in data])
+
+def strbytes_pretty(string):
+	return ' '.join(['%02X'%ord(x) for x in string])
 
 #------------------------------------------------------------------------------
 # keypatch dialog parent class
@@ -454,8 +460,6 @@ class FillRangeDialog(KeypatchDialog):
 	# - assembled bytes or manually
 	# - manually entered bytes
 	def data(self):
-		hexchars = '0123456789ABCDEFabcdef'
-
 		text = None
 		if self.group_a.isChecked():
 			text = self.qle_encoding.text()
@@ -520,6 +524,117 @@ class FillRangeDialog(KeypatchDialog):
 		self.bv().write(left, data)
 
 #------------------------------------------------------------------------------
+# search tool
+#------------------------------------------------------------------------------
+
+class SearchDialog(KeypatchDialog):
+	def __init__(self, context, parent=None):
+		super(SearchDialog, self).__init__(context, parent)
+
+		self.setWindowTitle('KEYPATCH:: Search')
+
+		# this widget is VBox of QGroupBox
+		layoutV = QVBoxLayout()
+		self.setLayout(layoutV)
+
+		self.qle_end = QLineEdit('00000000')
+		self.qle_bytes = QLineEdit('DE AD BE EF')
+		self.qle_search_size = QLineEdit()
+		self.qle_search_size.setReadOnly(True)
+		self.qle_search_size.setEnabled(False)
+		self.qle_preview = QLineEdit()
+		self.qle_preview.setReadOnly(True)
+		self.qle_preview.setEnabled(False)
+
+		btn_cancel = QPushButton('Cancel')
+		btn_search = QPushButton('Search')
+
+		self.group_a = QGroupBox('instruction:')
+		self.group_a.setCheckable(True)
+		form = QFormLayout()
+		form.addRow('Architecture:', self.qcb_arch)
+		form.addRow('Assembly:', self.qle_assembly)
+		form.addRow('Encoding:', self.qle_encoding)
+		self.group_a.setLayout(form)
+		layoutV.addWidget(self.group_a)
+
+		self.group_m = QGroupBox('bytes regex:')
+		self.group_m.setCheckable(True)
+		horiz = QHBoxLayout()
+		horiz.addWidget(self.qle_bytes)
+		self.group_m.setLayout(horiz)
+		layoutV.addWidget(self.group_m)
+
+		form = QFormLayout()
+		form.addRow(btn_search, btn_cancel)
+		layoutV.addLayout(form)
+
+		# connect everything
+		self.qcb_arch.currentTextChanged.connect(self.reassemble)
+		self.qle_assembly.textChanged.connect(self.reassemble)
+
+		self.group_a.toggled.connect(self.assembly_checked_toggle)
+		self.group_m.toggled.connect(self.manual_checked_toggle)
+
+		btn_cancel.clicked.connect(self.cancel)
+		btn_search.clicked.connect(self.search)
+
+		# set defaults
+		self.group_a.setCheckable(True)
+		self.group_m.setChecked(False)
+
+		self.qle_end.setText(hex(get_invalid_addr(self.bv(), self.addr())))
+		self.qle_assembly.setFocus()
+		btn_search.setDefault(True)
+
+	def assembly_checked_toggle(self, is_check):
+		self.group_m.setChecked(not is_check)
+
+	def manual_checked_toggle(self, is_check):
+		self.group_a.setChecked(not is_check)
+
+	def search(self):
+		# get search expression
+		sexpr = None
+		if self.group_a.isChecked():
+			sexpr = self.qle_encoding.text()
+		if self.group_m.isChecked():
+			sexpr = self.qle_bytes.text()
+
+		# convert to binary regex
+		sexpr = sexpr.strip()
+		sexpr = re.sub(r'\s+', '', sexpr)
+		regex = ''
+		while sexpr:
+			if len(sexpr) >= 2 and sexpr[0] in hexchars and sexpr[1] in hexchars:
+				regex += chr(int(sexpr[0:2], 16))
+				sexpr = sexpr[2:]
+			else:
+				regex += sexpr[0]
+				sexpr = sexpr[1:]
+
+		# validate regex
+		try:
+			regobj = re.compile(regex)
+		except Exception:
+			print('error: invalid regex' % regex)
+			return
+
+		# loop through each section, searching it
+		bview = self.bv()
+		for sname in bview.sections:
+			section = bview.sections[sname]
+			start = section.start
+			end = section.start + len(section)
+			print('searching section %s [0x%X, 0x%X)' % (sname, start, end))
+
+			# TODO: find better way
+			buf = ''.join([chr(x) for x in bview.read(start, end-start)])
+			for m in regobj.finditer(buf):
+				addr = section.start + m.start()
+				print('0x%X: %s' % (addr, strbytes_pretty(m.group())))
+
+#------------------------------------------------------------------------------
 # exported functions
 #------------------------------------------------------------------------------
 
@@ -538,4 +653,12 @@ def launch_fill_range(context):
 		return
 
 	dlg = FillRangeDialog(context)
+	dlg.exec_()
+
+def launch_search(context):
+	if context.binaryView == None:
+		error('no binary')
+		return
+
+	dlg = SearchDialog(context)
 	dlg.exec_()
