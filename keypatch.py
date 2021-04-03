@@ -263,9 +263,6 @@ class KeypatchDialog(QDialog):
 			self.qle_encoding.setText(str(e))
 			self.qle_encoding.home(True)
 
-	def cancel(self):
-		self.close()
-
 #------------------------------------------------------------------------------
 # patcher tool
 #------------------------------------------------------------------------------
@@ -283,7 +280,6 @@ class PatcherDialog(KeypatchDialog):
 		self.check_nops.setChecked(True)
 		self.check_save_original = QCheckBox('Save original instructions in binja comment')
 		self.check_save_original.setChecked(True)
-		btn_cancel = QPushButton('Cancel')
 		btn_patch = QPushButton('Patch')
 
 		layoutF.addRow('Architecture:', self.qcb_arch)
@@ -293,13 +289,12 @@ class PatcherDialog(KeypatchDialog):
 		layoutF.addRow('Size:', self.qle_asm_size)
 		layoutF.addRow(self.check_nops)
 		layoutF.addRow(self.check_save_original)
-		layoutF.addRow(btn_patch, btn_cancel)
+		layoutF.addRow(btn_patch)
 
 		# connect everything
 		self.qcb_arch.currentTextChanged.connect(self.reassemble)
 		self.qle_address.textChanged.connect(self.reassemble)
 		self.qle_assembly.textChanged.connect(self.reassemble)
-		btn_cancel.clicked.connect(self.cancel)
 		btn_patch.clicked.connect(self.patch)
 
 		# set defaults
@@ -360,7 +355,6 @@ class FillRangeDialog(KeypatchDialog):
 		self.qle_preview.setReadOnly(True)
 		self.qle_preview.setEnabled(False)
 
-		btn_cancel = QPushButton('Cancel')
 		btn_fill = QPushButton('Fill')
 
 		groupbox = QGroupBox('range:')
@@ -391,7 +385,6 @@ class FillRangeDialog(KeypatchDialog):
 
 		form = QFormLayout()
 		form.addRow('Preview:', self.qle_preview)
-		form.addRow(btn_fill, btn_cancel)
 		layoutV.addLayout(form)
 
 		# connect everything
@@ -407,7 +400,6 @@ class FillRangeDialog(KeypatchDialog):
 
 		self.qle_bytes.textChanged.connect(self.preview)
 
-		btn_cancel.clicked.connect(self.cancel)
 		btn_fill.clicked.connect(self.fill)
 
 		# set defaults
@@ -546,7 +538,6 @@ class SearchDialog(KeypatchDialog):
 		self.qle_preview.setReadOnly(True)
 		self.qle_preview.setEnabled(False)
 
-		btn_cancel = QPushButton('Cancel')
 		btn_search = QPushButton('Search')
 
 		self.group_a = QGroupBox('instruction:')
@@ -565,8 +556,9 @@ class SearchDialog(KeypatchDialog):
 		self.group_m.setLayout(horiz)
 		layoutV.addWidget(self.group_m)
 
+		layoutV.addWidget(btn_search)
+
 		form = QFormLayout()
-		form.addRow(btn_search, btn_cancel)
 		layoutV.addLayout(form)
 
 		# connect everything
@@ -576,7 +568,6 @@ class SearchDialog(KeypatchDialog):
 		self.group_a.toggled.connect(self.assembly_checked_toggle)
 		self.group_m.toggled.connect(self.manual_checked_toggle)
 
-		btn_cancel.clicked.connect(self.cancel)
 		btn_search.clicked.connect(self.search)
 
 		# set defaults
