@@ -359,8 +359,6 @@ class FillRangeDialog(KeypatchDialog):
 		self.qle_preview.setReadOnly(True)
 		self.qle_preview.setEnabled(False)
 
-		btn_fill = QPushButton('Fill')
-
 		groupbox = QGroupBox('range:')
 		horiz = QHBoxLayout()
 		horiz.addWidget(QLabel('['))
@@ -390,6 +388,9 @@ class FillRangeDialog(KeypatchDialog):
 		form = QFormLayout()
 		form.addRow('Preview:', self.qle_preview)
 		layoutV.addLayout(form)
+
+		btn_fill = QPushButton('Fill')
+		layoutV.addWidget(btn_fill)
 
 		# connect everything
 		self.qcb_arch.currentTextChanged.connect(self.reassemble)
