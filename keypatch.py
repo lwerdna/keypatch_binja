@@ -96,6 +96,41 @@ binja_to_ks = {
 	'x86_64': 'x64nasm'
 }
 
+# these words won't be substituted in assembly fixup
+arch_to_reserved = {
+	'aarch64': [ 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7',
+				 'r8', 'r9','r10','r11','r12','r13','r14','r15',
+				'r16','r17','r18','r19','r20','r21','r22','r23',
+				'r24','r25','r26','r27','r28','r29','r30','r31'
+				 'w0', 'w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7',
+				 'w8', 'w9','w10','w11','w12','w13','w14','w15',
+				'w16','w17','w18','w19','w20','w21','w22','w23',
+				'w24','w25','w26','w27','w28','w29','w30','w31',
+				 'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7',
+				 'x8', 'x9','x10','x11','x12','x13','x14','x15',
+				'x16','x17','x18','x19','x20','x21','x22','x23',
+				'x24','x25','x26','x27','x28','x29','x30','x31'],
+	'armv7': ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9','r10','r11','r12',
+				'sp', 'lr', 'pc', 'apsr'],
+	'mips32': [],
+	'ppc': [],
+	#'ppc_le',
+	'ppc64': [],
+	#'sh4',
+	'x86_16': [ 'ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di',
+				'ah', 'al', 'ch', 'cl', 'dh', 'dl', 'bh', 'bl',
+				'ss', 'cs', 'ds', 'es']
+}
+arch_to_reserved['thumb2'] = arch_to_reserved['armv7']
+arch_to_reserved['thumb2eb'] = arch_to_reserved['thumb2']
+arch_to_reserved['armv7eb'] = arch_to_reserved['armv7']
+arch_to_reserved['mipsel32'] = arch_to_reserved['mips32']
+arch_to_reserved['ppc64_le'] = arch_to_reserved['ppc64']
+arch_to_reserved['x86'] = arch_to_reserved['x86_16'] + \
+						['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi', 'fs', 'gs']
+arch_to_reserved['x86_64'] = arch_to_reserved['x86'] + \
+						['rax', 'rcx', 'rdx', 'rbx', 'rsp', 'rbp', 'rsi', 'rdi']
+
 font_mono = QFont('Courier New')
 font_mono.setStyleHint(QFont.TypeWriter)
 
@@ -159,6 +194,26 @@ def bytes_to_str(data):
 def strbytes_pretty(string):
 	return ' '.join(['%02X'%ord(x) for x in string])
 
+def fixup(bview, assembly):
+	reserved = arch_to_reserved[bview.arch.name]
+
+	# collect substitutions we'll make
+	substitutions = []
+	for m in re.finditer(r'\w+', assembly):
+		if m.start == 0: continue # do not replace mnemonic
+		symname = m.group(0)
+		if symname in reserved: continue # do not replace reserved words
+		if not (symname in bview.symbols and hasattr(bview.symbols[symname], 'address')):
+			continue
+		substitutions.append(symname)
+
+	# apply substitutions
+	for s in substitutions:
+		assembly = assembly.replace(s, hex(bview.symbols[s].address))
+
+	# done
+	return assembly
+
 #------------------------------------------------------------------------------
 # keypatch dialog parent class
 #------------------------------------------------------------------------------
@@ -187,6 +242,7 @@ class KeypatchDialog(QDialog):
 
 		# set up assembly fields
 		self.qle_assembly = QLineEdit()
+		self.qle_fixedup = QLineEdit()
 		self.qle_asm_size = QLineEdit()
 		self.qle_asm_size.setReadOnly(True)
 		self.qle_asm_size.setEnabled(False)
@@ -198,6 +254,7 @@ class KeypatchDialog(QDialog):
 		try:
 			(instxt, length) = disassemble_binja_single(context.binaryView, context.address)
 			self.qle_assembly.setText(instxt)
+			self.qle_fixedup.setText(instxt)
 			self.qle_asm_size.setText('%d' % length)
 			data = context.binaryView.read(context.address, length)
 			self.qle_encoding.setText(' '.join(['%02X'%x for x in data]))
@@ -252,7 +309,10 @@ class KeypatchDialog(QDialog):
 	def reassemble(self):
 		try:
 			(ks, assembly, addr) = (self.ks(), self.asm(), self.addr())
-			encoding, count = ks.asm(assembly, addr)
+
+			fixedup = fixup(self.bv(), assembly)
+			self.qle_fixedup.setText(fixedup)
+			encoding, count = ks.asm(fixedup, addr)
 			self.qle_encoding.setText(' '.join(['%02X'%x for x in encoding]))
 			self.qle_asm_size.setText('%d' % len(encoding))
 		except ValueError:
@@ -289,6 +349,7 @@ class PatcherDialog(KeypatchDialog):
 		layoutF.addRow('Architecture:', self.qcb_arch)
 		layoutF.addRow('Address:', self.qle_address)
 		layoutF.addRow('Assembly:', self.qle_assembly)
+		layoutF.addRow('Fixed Up:', self.qle_fixedup)
 		layoutF.addRow('Encoding:', self.qle_encoding)
 		layoutF.addRow('Size:', self.qle_asm_size)
 		layoutF.addRow(self.check_nops)
