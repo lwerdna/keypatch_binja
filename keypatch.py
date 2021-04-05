@@ -164,6 +164,7 @@ def disassemble_binja_single(bview, addr):
 	data = bview.read(addr, length)
 	(tokens, length) = bview.arch.get_instruction_text(data, addr)
 	if not tokens or not length:
+		return (None, None)
 		raise Exception('disassembly of %s failed' % str(data))
 	strs = [t.text for t in tokens]
 	strs = [' ' if s.isspace() else s for s in strs]
@@ -214,50 +215,93 @@ def fixup(bview, assembly):
 	# done
 	return assembly
 
+# arch is keystone namespace
+def get_nop(arch):
+	if arch in ['x16', 'x32', 'x64', 'x16att', 'x32att', 'x64att', 'x16nasm', 'x32nasm', 'x64nasm']:
+		return b'\x90'
+	elif arch in ['thumb', 'thumbv8']:
+		return b'\x00\xbf'
+	elif arch in ['thumbbe', 'thumbv8be']:
+		return b'\xbf\x00'
+	raise Exception('bad architecture name: %s' % bview.arch.name)
+
 #------------------------------------------------------------------------------
-# keypatch dialog parent class
+# GUI
 #------------------------------------------------------------------------------
 
-class KeypatchDialog(QDialog):
+class AssembleTab(QWidget):
 	def __init__(self, context, parent=None):
-		super(KeypatchDialog, self).__init__(parent)
+		super(AssembleTab, self).__init__(parent)
 		self.context = context
+		self.bv = context.binaryView
 
-		# set up the architecture
-		combobox = QComboBox()
+		#----------------------------------------------------------------------
+		# assemble tab
+		#----------------------------------------------------------------------
+		layout = QVBoxLayout()
+		self.setLayout(layout)
+
+		form = QFormLayout()
+		self.qcb_arch = QComboBox()
+		form.addRow('Architecture:', self.qcb_arch)
+		self.qle_address = QLineEdit('00000000')
+		form.addRow('Address:', self.qle_address)
+		self.qle_assembly = QLineEdit()
+		form.addRow('Assembly:', self.qle_assembly)
+		self.check_nops = QCheckBox('NOPs padding until next instruction boundary')
+		form.addRow(self.check_nops)
+		self.check_save_original = QCheckBox('Save original instructions in binja comment')
+		form.addRow(self.check_save_original)
+		layout.addLayout(form)
+
+		groupbox = QGroupBox('preview:')
+		form = QFormLayout()
+		self.qle_fixedup = QLineEdit()
+		form.addRow('Fixed Up:', self.qle_fixedup)
+		self.qle_data = QLineEdit()
+		form.addRow('Bytes:', self.qle_data)
+		self.qle_datasz = QLineEdit()
+		form.addRow('Size:', self.qle_datasz)
+		groupbox.setLayout(form)
+		layout.addWidget(groupbox)
+
+		btn_patch = QPushButton('Patch')
+		layout.addWidget(btn_patch)
+
+
+		# connect everything
+		self.qcb_arch.currentTextChanged.connect(self.reassemble)
+		self.qle_address.textChanged.connect(self.reassemble)
+		self.qle_assembly.textChanged.connect(self.reassemble)
+		btn_patch.clicked.connect(self.patch)
+
+		#----------------
+		# set defaults
+		#----------------
+
+		# default architecture dropdown in assemble
 		for (name, descr, arch_const, mode_const) in architecture_infos:
 			line = '%s: %s' % (name, descr)
-			combobox.addItem(line)
+			self.qcb_arch.addItem(line)
 
 		bv_arch_name = context.binaryView.arch.name
 		ks_arch_name = binja_to_ks.get(bv_arch_name, 'x64')
-		combobox.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
+		self.qcb_arch.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
 
-		self.qcb_arch = combobox
+		# default address to assemble
+		self.qle_address.setText(hex(self.context.address))
 
-		# set up the address
-		ledit = QLineEdit('00000000')
-		ledit.setText(hex(self.context.address))
-		self.qle_address = ledit
-
-		# set up assembly fields
-		self.qle_assembly = QLineEdit()
-		self.qle_fixedup = QLineEdit()
-		self.qle_asm_size = QLineEdit()
-		self.qle_asm_size.setReadOnly(True)
-		self.qle_asm_size.setEnabled(False)
-		self.qle_encoding = QLineEdit()
-		self.qle_encoding.setReadOnly(True)
-		self.qle_encoding.setEnabled(False)
-
+		# default assembly
 		ok = False
 		try:
-			(instxt, length) = disassemble_binja_single(context.binaryView, context.address)
+			(instxt, length) = disassemble_binja_single(self.bv, context.address)
+			if not instxt:
+				raise Exception('disassembly failed')
 			self.qle_assembly.setText(instxt)
 			self.qle_fixedup.setText(instxt)
-			self.qle_asm_size.setText('%d' % length)
+			self.qle_datasz.setText('%d' % length)
 			data = context.binaryView.read(context.address, length)
-			self.qle_encoding.setText(' '.join(['%02X'%x for x in data]))
+			self.qle_data.setText(' '.join(['%02X'%x for x in data]))
 			ok = True
 		except Exception as e:
 			print(e)
@@ -265,6 +309,21 @@ class KeypatchDialog(QDialog):
 		if not ok:
 			self.qle_assembly.setText('nop')
 			self.reassemble()
+
+		# assembly fields
+		self.qle_data.setReadOnly(True)
+		self.qle_data.setEnabled(False)
+		self.qle_datasz.setReadOnly(True)
+		self.qle_datasz.setEnabled(False)
+		self.qle_fixedup.setReadOnly(True)
+		self.qle_fixedup.setEnabled(False)
+
+		# default
+		self.check_nops.setChecked(True)
+		self.check_save_original.setChecked(True)
+
+		self.qle_assembly.setFocus()
+		btn_patch.setDefault(True)
 
 	#
 	# accessors
@@ -285,115 +344,71 @@ class KeypatchDialog(QDialog):
 
 	def data(self):
 		try:
-			values = [int(x, 16) for x in self.qle_encoding.text().split(' ')]
+			values = [int(x, 16) for x in self.qle_data.text().split(' ')]
 			return bytes(values)
 		except Exception:
 			return None
 
-	def bv(self):
-		return self.context.binaryView
-
+	# qle_assembly -> fixup -> qle_data
 	#
-	# functions
-	#
-	def nop(self):
-		arch = self.arch()
-		if arch in ['x16', 'x32', 'x64', 'x16att', 'x32att', 'x64att', 'x16nasm', 'x32nasm', 'x64nasm']:
-			return b'\x90'
-		elif arch in ['thumb', 'thumbv8']:
-			return b'\x00\xbf'
-		elif arch in ['thumbbe', 'thumbv8be']:
-			return b'\xbf\x00'
-		return None
-
 	def reassemble(self):
 		try:
+			# get input
 			(ks, assembly, addr) = (self.ks(), self.asm(), self.addr())
 
-			fixedup = fixup(self.bv(), assembly)
+			# apply fixup
+			fixedup = fixup(self.bv, assembly)
 			self.qle_fixedup.setText(fixedup)
-			encoding, count = ks.asm(fixedup, addr)
-			self.qle_encoding.setText(' '.join(['%02X'%x for x in encoding]))
-			self.qle_asm_size.setText('%d' % len(encoding))
+
+			# disassemble
+			data, count = ks.asm(fixedup, addr)
+			if not data:
+				return
+
+			# pad with nops
+			if self.check_nops.isChecked():
+				length = disassemble_length(self.bv, self.addr())
+				if length and length > len(data):
+					nop = get_nop(self.arch())
+					sled = (length // len(nop)) * nop
+					sled = list(sled) # b'\xAA' -> [0xAA]
+					data = data + sled[len(data):]
+
+			# set
+			self.qle_data.setText(' '.join(['%02X'%x for x in data]))
+			self.qle_datasz.setText('%d' % len(data))
+
 		except ValueError:
-			self.qle_asm_size.setText('')
-			self.qle_encoding.setText('invalid address')
+			self.qle_datasz.setText('')
+			self.qle_data.setText('invalid address')
 		except KsError as e:
-			self.qle_asm_size.setText('')
-			self.qle_encoding.setText(str(e))
-			self.qle_encoding.home(True)
+			self.qle_datasz.setText('')
+			self.qle_data.setText(str(e))
+			self.qle_data.home(True)
 		except Exception as e:
-			self.qle_asm_size.setText('')
-			self.qle_encoding.setText(str(e))
-			self.qle_encoding.home(True)
+			self.qle_datasz.setText('')
+			self.qle_data.setText(str(e))
+			self.qle_data.home(True)
 
-#------------------------------------------------------------------------------
-# patcher tool
-#------------------------------------------------------------------------------
-
-class PatcherDialog(KeypatchDialog):
-	def __init__(self, context, parent=None):
-		super(PatcherDialog, self).__init__(context, parent)
-
-		self.setWindowTitle('KEYPATCH:: Patcher')
-
-		layoutF = QFormLayout()
-		self.setLayout(layoutF)
-
-		self.check_nops = QCheckBox('NOPs padding until next instruction boundary')
-		self.check_nops.setChecked(True)
-		self.check_save_original = QCheckBox('Save original instructions in binja comment')
-		self.check_save_original.setChecked(True)
-		btn_patch = QPushButton('Patch')
-
-		layoutF.addRow('Architecture:', self.qcb_arch)
-		layoutF.addRow('Address:', self.qle_address)
-		layoutF.addRow('Assembly:', self.qle_assembly)
-		layoutF.addRow('Fixed Up:', self.qle_fixedup)
-		layoutF.addRow('Encoding:', self.qle_encoding)
-		layoutF.addRow('Size:', self.qle_asm_size)
-		layoutF.addRow(self.check_nops)
-		layoutF.addRow(self.check_save_original)
-		layoutF.addRow(btn_patch)
-
-		# connect everything
-		self.qcb_arch.currentTextChanged.connect(self.reassemble)
-		self.qle_address.textChanged.connect(self.reassemble)
-		self.qle_assembly.textChanged.connect(self.reassemble)
-		btn_patch.clicked.connect(self.patch)
-
-		# set defaults
-		self.qle_assembly.setFocus()
-		btn_patch.setDefault(True)
-
+	# qle_data -> binary view
+	#
 	def patch(self):
 		data = self.data()
-
-		# fill with NOP's?
-		try:
-			if self.check_nops.isChecked():
-				length = disassemble_length_until(self.bv(), self.addr(), len(data))
-				if length > len(data):
-					nop = self.nop()
-					sled = (length // len(nop)) * nop
-					data = data + sled[len(data):]
-		except Exception:
-			pass
 
 		comment = None
 		try:
 			if self.check_save_original.isChecked():
-				(instxt, length) = disassemble_binja_single(self.bv(), self.addr())
+				(instxt, length) = disassemble_binja_single(self.bv, self.addr())
 				comment = instxt
 		except Exception as e:
 			print(e)
 			pass
 
 		try:
-			self.bv().write(self.addr(), data)
+			self.bv.write(self.addr(), data)
 
 			if comment:
-				self.bv().set_comment_at(self.addr(), comment)
+				self.bv.set_comment_at(self.addr(), comment)
 		except Exception as e:
 			return
 
@@ -401,11 +416,11 @@ class PatcherDialog(KeypatchDialog):
 # fill range tool
 #------------------------------------------------------------------------------
 
-class FillRangeDialog(KeypatchDialog):
+class FillRangeTab(QWidget):
 	def __init__(self, context, parent=None):
-		super(FillRangeDialog, self).__init__(context, parent)
-
-		self.setWindowTitle('KEYPATCH:: Fill Range')
+		super(FillRangeTab, self).__init__(parent)
+		self.context = context
+		self.bv = context.binaryView
 
 		# this widget is VBox of QGroupBox
 		layoutV = QVBoxLayout()
@@ -423,6 +438,7 @@ class FillRangeDialog(KeypatchDialog):
 		groupbox = QGroupBox('range:')
 		horiz = QHBoxLayout()
 		horiz.addWidget(QLabel('['))
+		self.qle_address = QLineEdit('00000000')
 		horiz.addWidget(self.qle_address)
 		horiz.addWidget(QLabel(','))
 		horiz.addWidget(self.qle_end)
@@ -430,16 +446,8 @@ class FillRangeDialog(KeypatchDialog):
 		groupbox.setLayout(horiz)
 		layoutV.addWidget(groupbox)
 
-		self.group_a = QGroupBox('assemble:')
-		self.group_a.setCheckable(True)
-		form = QFormLayout()
-		form.addRow('Architecture:', self.qcb_arch)
-		form.addRow('Assembly:', self.qle_assembly)
-		form.addRow('Encoding:', self.qle_encoding)
-		self.group_a.setLayout(form)
-		layoutV.addWidget(self.group_a)
-
-		self.group_m = QGroupBox('manual:')
+		self.group_a = QGroupBox('from assemble tab:')
+		self.group_m = QGroupBox('manually entered:')
 		self.group_m.setCheckable(True)
 		form = QFormLayout()
 		form.addRow('Bytes:', self.qle_bytes)
@@ -454,14 +462,9 @@ class FillRangeDialog(KeypatchDialog):
 		layoutV.addWidget(btn_fill)
 
 		# connect everything
-		self.qcb_arch.currentTextChanged.connect(self.reassemble)
-		self.qle_assembly.textChanged.connect(self.reassemble)
-		self.qle_encoding.textChanged.connect(self.preview)
-
 		self.qle_address.textChanged.connect(self.preview)
 		self.qle_end.textChanged.connect(self.preview)
 
-		self.group_a.toggled.connect(self.assembly_checked_toggle)
 		self.group_m.toggled.connect(self.manual_checked_toggle)
 
 		self.qle_bytes.textChanged.connect(self.preview)
@@ -472,8 +475,7 @@ class FillRangeDialog(KeypatchDialog):
 		self.group_a.setChecked(True)
 		self.group_m.setChecked(False)
 
-		self.qle_end.setText(hex(get_invalid_addr(self.bv(), self.addr())))
-		self.qle_assembly.setFocus()
+		self.qle_end.setText(hex(self.context.address))
 		btn_fill.setDefault(True)
 
 	# report error to the preview field
@@ -564,7 +566,7 @@ class FillRangeDialog(KeypatchDialog):
 		(left, right, length) = self.interval()
 		if left == None: return None
 		for a in [left, right-1]:
-			if not is_valid_addr(self.bv(), a):
+			if not is_valid_addr(self.bv, a):
 				self.error('0x%X invalid write address' % a)
 				return
 
@@ -579,17 +581,17 @@ class FillRangeDialog(KeypatchDialog):
 
 		# write it
 		print('writing %d bytes to 0x%X' % (len(data), left))
-		self.bv().write(left, data)
+		self.bv.write(left, data)
 
 #------------------------------------------------------------------------------
 # search tool
 #------------------------------------------------------------------------------
 
-class SearchDialog(KeypatchDialog):
+class SearchTab(QWidget):
 	def __init__(self, context, parent=None):
-		super(SearchDialog, self).__init__(context, parent)
-
-		self.setWindowTitle('KEYPATCH:: Search')
+		super(SearchTab, self).__init__(parent)
+		self.context = context
+		self.bv = context.binaryView
 
 		# this widget is VBox of QGroupBox
 		layoutV = QVBoxLayout()
@@ -606,14 +608,8 @@ class SearchDialog(KeypatchDialog):
 
 		btn_search = QPushButton('Search')
 
-		self.group_a = QGroupBox('instruction:')
+		self.group_a = QGroupBox('from assemble tab:')
 		self.group_a.setCheckable(True)
-		form = QFormLayout()
-		form.addRow('Architecture:', self.qcb_arch)
-		form.addRow('Assembly:', self.qle_assembly)
-		form.addRow('Encoding:', self.qle_encoding)
-		self.group_a.setLayout(form)
-		layoutV.addWidget(self.group_a)
 
 		self.group_m = QGroupBox('bytes regex:')
 		self.group_m.setCheckable(True)
@@ -635,9 +631,6 @@ class SearchDialog(KeypatchDialog):
 		layoutV.addLayout(form)
 
 		# connect everything
-		self.qcb_arch.currentTextChanged.connect(self.reassemble)
-		self.qle_assembly.textChanged.connect(self.reassemble)
-
 		self.group_a.toggled.connect(self.assembly_checked_toggle)
 		self.group_m.toggled.connect(self.manual_checked_toggle)
 
@@ -649,13 +642,13 @@ class SearchDialog(KeypatchDialog):
 		self.group_a.setChecked(False)
 		self.group_m.setChecked(True)
 
-		tmp = self.qle_encoding.text()
-		if not re.match(r'^[a-fA-F0-9 ]+$', tmp):
-			tmp = 'DE AD BE EF'
-		self.qle_bytes.setText(tmp)
+		#tmp = self.qle_encoding.text()
+		#if not re.match(r'^[a-fA-F0-9 ]+$', tmp):
+		#	tmp = 'DE AD BE EF'
+		#self.qle_bytes.setText(tmp)
 
-		self.qle_end.setText(hex(get_invalid_addr(self.bv(), self.addr())))
-		self.qle_assembly.setFocus()
+		self.qle_end.setText(hex(get_invalid_addr(self.bv, self.context.address)))
+		#self.qle_assembly.setFocus()
 		btn_search.setDefault(True)
 
 	def assembly_checked_toggle(self, is_check):
@@ -696,7 +689,7 @@ class SearchDialog(KeypatchDialog):
 		self.list_results.show()
 
 		# loop through each section, searching it
-		bview = self.bv()
+		bview = self.bv
 		width = max([len(sname) for sname in bview.sections])
 		for sname in bview.sections:
 			section = bview.sections[sname]
@@ -715,33 +708,40 @@ class SearchDialog(KeypatchDialog):
 		#print('you double clicked %s' % item.text())
 		m = re.match(r'^.* ([a-fA-F0-9]+):', item.text())
 		addr = int(m.group(1), 16)
-		self.bv().navigate(self.bv().view, addr)
+		self.bv.navigate(self.bv.view, addr)
+
+#------------------------------------------------------------------------------
+# top level tab gui
+#------------------------------------------------------------------------------
+
+class KeypatchDialog(QDialog):
+	def __init__(self, context, parent=None):
+		super(KeypatchDialog, self).__init__(parent)
+
+		self.tab1 = AssembleTab(context)
+		self.tab2 = FillRangeTab(context)
+		self.tab3 = SearchTab(context)
+
+		tabs = QTabWidget()
+		tabs.addTab(self.tab1, "assemble")
+		tabs.addTab(self.tab2, "fill")
+		tabs.addTab(self.tab3, "search")
+
+		layout = QVBoxLayout()
+		layout.addWidget(tabs)
+		self.setLayout(layout)
+
+		self.setWindowTitle('KEYPATCH')
 
 #------------------------------------------------------------------------------
 # exported functions
 #------------------------------------------------------------------------------
 
 # input: binaryninjaui.UIActionContext (struct UIActionContext from api/ui/action.h)
-def launch_patcher(context):
+def launch_keypatch(context):
 	if context.binaryView == None:
 		error('no binary')
 		return
 
-	dlg = PatcherDialog(context)
-	dlg.exec_()
-
-def launch_fill_range(context):
-	if context.binaryView == None:
-		error('no binary')
-		return
-
-	dlg = FillRangeDialog(context)
-	dlg.exec_()
-
-def launch_search(context):
-	if context.binaryView == None:
-		error('no binary')
-		return
-
-	dlg = SearchDialog(context)
+	dlg = KeypatchDialog(context)
 	dlg.exec_()
