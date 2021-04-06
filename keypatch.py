@@ -235,6 +235,9 @@ class AssembleTab(QWidget):
 		self.context = context
 		self.bv = context.binaryView
 
+		# other QLineEntry widgets to receive bytes upon assembling
+		self.qles_bytes = []
+
 		#----------------------------------------------------------------------
 		# assemble tab
 		#----------------------------------------------------------------------
@@ -267,7 +270,6 @@ class AssembleTab(QWidget):
 
 		btn_patch = QPushButton('Patch')
 		layout.addWidget(btn_patch)
-
 
 		# connect everything
 		self.qcb_arch.currentTextChanged.connect(self.reassemble)
@@ -308,7 +310,6 @@ class AssembleTab(QWidget):
 			pass
 		if not ok:
 			self.qle_assembly.setText('nop')
-			self.reassemble()
 
 		# assembly fields
 		self.qle_data.setReadOnly(True)
@@ -349,6 +350,10 @@ class AssembleTab(QWidget):
 		except Exception:
 			return None
 
+	# add another QLineEntry to receive assembled bytes
+	def add_qles_bytes(self, widget):
+		self.qles_bytes.append(widget)
+
 	# qle_assembly -> fixup -> qle_data
 	#
 	def reassemble(self):
@@ -360,10 +365,11 @@ class AssembleTab(QWidget):
 			fixedup = fixup(self.bv, assembly)
 			self.qle_fixedup.setText(fixedup)
 
-			# disassemble
+			# assemble
 			data, count = ks.asm(fixedup, addr)
-			if not data:
-				return
+			if not data: return
+			for widget in self.qles_bytes:
+				widget.setText(bytes_to_str(data))
 
 			# pad with nops
 			if self.check_nops.isChecked():
@@ -375,20 +381,15 @@ class AssembleTab(QWidget):
 					data = data + sled[len(data):]
 
 			# set
-			self.qle_data.setText(' '.join(['%02X'%x for x in data]))
+			self.qle_data.setText(bytes_to_str(data))
 			self.qle_datasz.setText('%d' % len(data))
 
 		except ValueError:
-			self.qle_datasz.setText('')
-			self.qle_data.setText('invalid address')
+			self.error('invalid address')
 		except KsError as e:
-			self.qle_datasz.setText('')
-			self.qle_data.setText(str(e))
-			self.qle_data.home(True)
+			self.error(str(e))
 		except Exception as e:
-			self.qle_datasz.setText('')
-			self.qle_data.setText(str(e))
-			self.qle_data.home(True)
+			self.error(str(e))
 
 	# qle_data -> binary view
 	#
@@ -412,6 +413,14 @@ class AssembleTab(QWidget):
 		except Exception as e:
 			return
 
+	# report error to the bytes
+	def error(self, msg):
+		self.qle_datasz.setText('')
+		if not ('error' in msg or 'ERROR' in msg):
+			msg = 'ERROR: ' + msg
+		self.qle_data.setText(msg)
+		self.qle_data.home(True)
+
 #------------------------------------------------------------------------------
 # fill range tool
 #------------------------------------------------------------------------------
@@ -427,6 +436,7 @@ class FillRangeTab(QWidget):
 		self.setLayout(layoutV)
 
 		self.qle_end = QLineEdit('00000000')
+		self.qle_encoding = QLineEdit()
 		self.qle_bytes = QLineEdit()
 		self.qle_fill_size = QLineEdit()
 		self.qle_fill_size.setReadOnly(True)
@@ -447,7 +457,13 @@ class FillRangeTab(QWidget):
 		layoutV.addWidget(groupbox)
 
 		self.group_a = QGroupBox('from assemble tab:')
-		self.group_m = QGroupBox('manually entered:')
+		self.group_a.setCheckable(True)
+		form = QFormLayout()
+		form.addRow('Encoding:', self.qle_encoding)
+		self.group_a.setLayout(form)
+		layoutV.addWidget(self.group_a)
+
+		self.group_m = QGroupBox('manual entry:')
 		self.group_m.setCheckable(True)
 		form = QFormLayout()
 		form.addRow('Bytes:', self.qle_bytes)
@@ -465,6 +481,7 @@ class FillRangeTab(QWidget):
 		self.qle_address.textChanged.connect(self.preview)
 		self.qle_end.textChanged.connect(self.preview)
 
+		self.group_a.toggled.connect(self.assembly_checked_toggle)
 		self.group_m.toggled.connect(self.manual_checked_toggle)
 
 		self.qle_bytes.textChanged.connect(self.preview)
@@ -648,7 +665,6 @@ class SearchTab(QWidget):
 		#self.qle_bytes.setText(tmp)
 
 		self.qle_end.setText(hex(get_invalid_addr(self.bv, self.context.address)))
-		#self.qle_assembly.setFocus()
 		btn_search.setDefault(True)
 
 	def assembly_checked_toggle(self, is_check):
@@ -732,6 +748,13 @@ class KeypatchDialog(QDialog):
 		self.setLayout(layout)
 
 		self.setWindowTitle('KEYPATCH')
+
+		#
+		self.tab1.add_qles_bytes(self.tab2.qle_encoding)
+		self.tab1.reassemble()
+
+		self.tab1.setFocus()
+		self.tab1.qle_assembly.setFocus()
 
 #------------------------------------------------------------------------------
 # exported functions
