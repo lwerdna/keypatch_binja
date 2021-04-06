@@ -87,10 +87,10 @@ binja_to_ks = {
 	'mipsel32': 'mips',
 	'mips32': 'mipsbe',
 	'ppc': 'ppc32be',
-	#'ppc_le',
+	'ppc_le': 'ERROR',
 	'ppc64': 'ppc64be',
 	'ppc64_le': 'ppc64',
-	#'sh4',
+	'sh4': 'ERROR',
 	'x86_16': 'x16nasm',
 	'x86': 'x32nasm',
 	'x86_64': 'x64nasm'
@@ -257,7 +257,7 @@ class AssembleTab(QWidget):
 		form.addRow(self.check_save_original)
 		layout.addLayout(form)
 
-		groupbox = QGroupBox('preview:')
+		groupbox = QGroupBox('Preview:')
 		form = QFormLayout()
 		self.qle_fixedup = QLineEdit()
 		form.addRow('Fixed Up:', self.qle_fixedup)
@@ -382,7 +382,7 @@ class AssembleTab(QWidget):
 
 			# set
 			self.qle_data.setText(bytes_to_str(data))
-			self.qle_datasz.setText('%d' % len(data))
+			self.qle_datasz.setText(hex(len(data)))
 
 		except ValueError:
 			self.error('invalid address')
@@ -437,15 +437,18 @@ class FillRangeTab(QWidget):
 
 		self.qle_end = QLineEdit('00000000')
 		self.qle_encoding = QLineEdit()
-		self.qle_bytes = QLineEdit()
+		self.qle_bytes = QLineEdit('00')
 		self.qle_fill_size = QLineEdit()
 		self.qle_fill_size.setReadOnly(True)
 		self.qle_fill_size.setEnabled(False)
 		self.qle_preview = QLineEdit()
 		self.qle_preview.setReadOnly(True)
 		self.qle_preview.setEnabled(False)
+		self.qle_datasz = QLineEdit()
 
-		groupbox = QGroupBox('range:')
+		self.qcb_sections = QComboBox()
+		layoutV.addWidget(self.qcb_sections)
+
 		horiz = QHBoxLayout()
 		horiz.addWidget(QLabel('['))
 		self.qle_address = QLineEdit('00000000')
@@ -453,51 +456,57 @@ class FillRangeTab(QWidget):
 		horiz.addWidget(QLabel(','))
 		horiz.addWidget(self.qle_end)
 		horiz.addWidget(QLabel(')'))
-		groupbox.setLayout(horiz)
-		layoutV.addWidget(groupbox)
-
-		self.group_a = QGroupBox('from assemble tab:')
-		self.group_a.setCheckable(True)
-		form = QFormLayout()
-		form.addRow('Encoding:', self.qle_encoding)
-		self.group_a.setLayout(form)
-		layoutV.addWidget(self.group_a)
-
-		self.group_m = QGroupBox('manual entry:')
-		self.group_m.setCheckable(True)
-		form = QFormLayout()
-		form.addRow('Bytes:', self.qle_bytes)
-		self.group_m.setLayout(form)
-		layoutV.addWidget(self.group_m)
+		layoutV.addLayout(horiz)
 
 		form = QFormLayout()
+		self.chk_encoding = QCheckBox('Assembled:')
+		form.addRow(self.chk_encoding, self.qle_encoding)
+		self.chk_manual = QCheckBox('Manual Entry:')
+		form.addRow(self.chk_manual, self.qle_bytes)
 		form.addRow('Preview:', self.qle_preview)
+		form.addRow('Size:', self.qle_datasz)
 		layoutV.addLayout(form)
+
+		# or QLayout::setAlignment
+		layoutV.addStretch()
 
 		btn_fill = QPushButton('Fill')
 		layoutV.addWidget(btn_fill)
 
 		# connect everything
+		self.qcb_sections.currentTextChanged.connect(self.section_chosen)
 		self.qle_address.textChanged.connect(self.preview)
 		self.qle_end.textChanged.connect(self.preview)
 
-		self.group_a.toggled.connect(self.assembly_checked_toggle)
-		self.group_m.toggled.connect(self.manual_checked_toggle)
+		self.chk_encoding.toggled.connect(self.encoding_checked_toggle)
+		self.chk_manual.toggled.connect(self.manual_checked_toggle)
 
 		self.qle_bytes.textChanged.connect(self.preview)
 
 		btn_fill.clicked.connect(self.fill)
 
 		# set defaults
-		self.group_a.setChecked(True)
-		self.group_m.setChecked(False)
+		nop = get_nop(binja_to_ks[self.bv.arch.name])
+		if nop:
+			self.qle_bytes.setText(bytes_to_str(nop))
 
-		self.qle_end.setText(hex(self.context.address))
+		for (sname, section) in self.bv.sections.items():
+			section = self.bv.sections[sname]
+			line = '%s [0x%X, 0x%X)' % (sname, section.start, section.start + len(section))
+			self.qcb_sections.addItem(line)
+
+		self.chk_encoding.setChecked(False)
+		self.chk_manual.setChecked(True)
+
+		self.qle_address.setText(hex(self.context.address))
+		self.qle_end.setText(hex(get_invalid_addr(self.bv, self.context.address)))
 		btn_fill.setDefault(True)
 
 	# report error to the preview field
 	def error(self, msg):
 		self.qle_preview.setText('ERROR: ' + msg)
+		self.qle_preview.home(True)
+		self.qle_datasz.setText('')
 
 	# get the left, right, and length of the entered fill interval
 	def interval(self):
@@ -538,12 +547,13 @@ class FillRangeTab(QWidget):
 	# - manually entered bytes
 	def data(self):
 		text = None
-		if self.group_a.isChecked():
+		if self.chk_encoding.isChecked():
 			text = self.qle_encoding.text()
-		if self.group_m.isChecked():
+		if self.chk_manual.isChecked():
 			text = self.qle_bytes.text()
 
 		buf = b''
+		if not text: return buf
 		for bstr in text.split(' '):
 			if bstr.startswith('0x'):
 				bstr = bstr[2:]
@@ -556,27 +566,45 @@ class FillRangeTab(QWidget):
 
 		return buf
 
-	def assembly_checked_toggle(self, is_check):
-		self.group_m.setChecked(not is_check)
+	# when user selects a section, populate [<address>, <end>)
+	def section_chosen(self):
+		line = self.qcb_sections.currentText()
+		m = re.match(r'.* \[(.*), (.*)\)$', line)
+		self.qle_address.setText(m.group(1))
+		self.qle_end.setText(m.group(2))
+
+	def encoding_checked_toggle(self, is_check):
+		self.chk_manual.setChecked(not is_check)
 		self.preview()
 
 	def manual_checked_toggle(self, is_check):
-		self.group_a.setChecked(not is_check)
+		self.chk_encoding.setChecked(not is_check)
 		self.preview()
 
+	# selections -> preview field
 	def preview(self):
-		(_, _, length) = self.interval()
-		if not length: return None
+		(_, _, fill_len) = self.interval()
+		if not fill_len: return None
 		data = self.data()
 		if not data: return None
 
-		if length <= 8:
-			self.qle_preview.setText(bytes_to_str(data))
+		self.qle_datasz.setText(hex(fill_len))
+
+		if fill_len <= 8:
+			self.qle_preview.setText(bytes_to_str(data[0:fill_len]))
 		else:
-			head = data * math.ceil(6/len(data))
-			idx = len(data) + (length % len(data)) - 2
-			tail = (data+data)[idx:idx+2]
+			# fill length > 8
+			if len(data) == 1:
+				head = data * 6
+				tail = data * 2
+			else:
+				head = (data * math.ceil(6/len(data)))[0:6]
+				idx = len(data) + (fill_len % len(data)) - 2
+				tail = (data+data)[idx:idx+2]
+
 			self.qle_preview.setText(bytes_to_str(head) + ' ... ' + bytes_to_str(tail))
+
+		self.qle_preview.home(True)
 
 	def fill(self):
 		# get, validate the interval
@@ -648,9 +676,6 @@ class SearchTab(QWidget):
 		layoutV.addLayout(form)
 
 		# connect everything
-		self.group_a.toggled.connect(self.assembly_checked_toggle)
-		self.group_m.toggled.connect(self.manual_checked_toggle)
-
 		btn_search.clicked.connect(self.search)
 
 		self.list_results.itemDoubleClicked.connect(self.results_clicked)
@@ -666,12 +691,6 @@ class SearchTab(QWidget):
 
 		self.qle_end.setText(hex(get_invalid_addr(self.bv, self.context.address)))
 		btn_search.setDefault(True)
-
-	def assembly_checked_toggle(self, is_check):
-		self.group_m.setChecked(not is_check)
-
-	def manual_checked_toggle(self, is_check):
-		self.group_a.setChecked(not is_check)
 
 	def search(self):
 		# get search expression
@@ -739,15 +758,15 @@ class KeypatchDialog(QDialog):
 		self.tab3 = SearchTab(context)
 
 		tabs = QTabWidget()
-		tabs.addTab(self.tab1, "assemble")
-		tabs.addTab(self.tab2, "fill")
-		tabs.addTab(self.tab3, "search")
+		tabs.addTab(self.tab1, "Assemble")
+		tabs.addTab(self.tab2, "Fill")
+		tabs.addTab(self.tab3, "Search")
 
 		layout = QVBoxLayout()
 		layout.addWidget(tabs)
 		self.setLayout(layout)
 
-		self.setWindowTitle('KEYPATCH')
+		self.setWindowTitle('Keypatch')
 
 		#
 		self.tab1.add_qles_bytes(self.tab2.qle_encoding)
