@@ -437,6 +437,8 @@ class FillRangeTab(QWidget):
 
 		self.qle_end = QLineEdit('00000000')
 		self.qle_encoding = QLineEdit()
+		self.qle_encoding.setReadOnly(True)
+		self.qle_encoding.setEnabled(False)
 		self.qle_bytes = QLineEdit('00')
 		self.qle_fill_size = QLineEdit()
 		self.qle_fill_size.setReadOnly(True)
@@ -469,7 +471,6 @@ class FillRangeTab(QWidget):
 
 		# or QLayout::setAlignment
 		layoutV.addStretch()
-
 		btn_fill = QPushButton('Fill')
 		layoutV.addWidget(btn_fill)
 
@@ -501,6 +502,14 @@ class FillRangeTab(QWidget):
 		self.qle_address.setText(hex(self.context.address))
 		self.qle_end.setText(hex(get_invalid_addr(self.bv, self.context.address)))
 		btn_fill.setDefault(True)
+
+	def encoding_checked_toggle(self, is_check):
+		self.chk_manual.setChecked(not is_check)
+		self.preview()
+
+	def manual_checked_toggle(self, is_check):
+		self.chk_encoding.setChecked(not is_check)
+		self.preview()
 
 	# report error to the preview field
 	def error(self, msg):
@@ -625,7 +634,7 @@ class FillRangeTab(QWidget):
 		data = data[0:length]
 
 		# write it
-		print('writing %d bytes to 0x%X' % (len(data), left))
+		#print('writing 0x%X bytes to 0x%X' % (len(data), left))
 		self.bv.write(left, data)
 
 #------------------------------------------------------------------------------
@@ -640,64 +649,51 @@ class SearchTab(QWidget):
 
 		# this widget is VBox of QGroupBox
 		layoutV = QVBoxLayout()
-		self.setLayout(layoutV)
-
-		self.qle_end = QLineEdit('00000000')
-		self.qle_bytes = QLineEdit('DE AD BE EF')
-		self.qle_search_size = QLineEdit()
-		self.qle_search_size.setReadOnly(True)
-		self.qle_search_size.setEnabled(False)
-		self.qle_preview = QLineEdit()
-		self.qle_preview.setReadOnly(True)
-		self.qle_preview.setEnabled(False)
-
-		btn_search = QPushButton('Search')
-
-		self.group_a = QGroupBox('from assemble tab:')
-		self.group_a.setCheckable(True)
-
-		self.group_m = QGroupBox('bytes regex:')
-		self.group_m.setCheckable(True)
-		horiz = QHBoxLayout()
-		horiz.addWidget(self.qle_bytes)
-		self.group_m.setLayout(horiz)
-		layoutV.addWidget(self.group_m)
-
-		# button
-		layoutV.addWidget(btn_search)
-
-		# search results
-		self.list_results = QListWidget()
-		self.list_results.setFont(font_mono)
-		self.list_results.hide()
-		layoutV.addWidget(self.list_results)
 
 		form = QFormLayout()
+		self.chk_encoding = QCheckBox('Assembled:')
+		self.qle_encoding = QLineEdit()
+		self.qle_encoding.setReadOnly(True)
+		self.qle_encoding.setEnabled(False)
+		form.addRow(self.chk_encoding, self.qle_encoding)
+		self.chk_manual = QCheckBox('Bytes Regex:')
+		self.qle_bytes = QLineEdit('48 (8b|8d)+ . . (F8|10)')
+		form.addRow(self.chk_manual, self.qle_bytes)
+		layoutV.addLayout(form)
+		self.list_results = QListWidget()
+		self.list_results.setFont(font_mono)
+		layoutV.addWidget(self.list_results)
+		btn_search = QPushButton('Search')
+		layoutV.addWidget(btn_search)
 		layoutV.addLayout(form)
 
+		self.setLayout(layoutV)
+
 		# connect everything
+		self.chk_encoding.toggled.connect(self.encoding_checked_toggle)
+		self.chk_manual.toggled.connect(self.manual_checked_toggle)
+		self.list_results.itemDoubleClicked.connect(self.results_clicked)
 		btn_search.clicked.connect(self.search)
 
-		self.list_results.itemDoubleClicked.connect(self.results_clicked)
-
 		# set defaults
-		self.group_a.setChecked(False)
-		self.group_m.setChecked(True)
+		self.chk_encoding.setChecked(False)
+		self.chk_manual.setChecked(True)
 
-		#tmp = self.qle_encoding.text()
-		#if not re.match(r'^[a-fA-F0-9 ]+$', tmp):
-		#	tmp = 'DE AD BE EF'
-		#self.qle_bytes.setText(tmp)
-
-		self.qle_end.setText(hex(get_invalid_addr(self.bv, self.context.address)))
+		self.qle_bytes.setFocus()
 		btn_search.setDefault(True)
+
+	def encoding_checked_toggle(self, is_check):
+		self.chk_manual.setChecked(not is_check)
+
+	def manual_checked_toggle(self, is_check):
+		self.chk_encoding.setChecked(not is_check)
 
 	def search(self):
 		# get search expression
 		sexpr = None
-		if self.group_a.isChecked():
+		if self.chk_encoding.isChecked():
 			sexpr = self.qle_encoding.text()
-		if self.group_m.isChecked():
+		if self.chk_manual.isChecked():
 			sexpr = self.qle_bytes.text()
 
 		# convert to binary regex
@@ -770,6 +766,7 @@ class KeypatchDialog(QDialog):
 
 		#
 		self.tab1.add_qles_bytes(self.tab2.qle_encoding)
+		self.tab1.add_qles_bytes(self.tab3.qle_encoding)
 		self.tab1.reassemble()
 
 		self.tab1.setFocus()
