@@ -7,7 +7,8 @@ import math
 # Qt stuff
 from PySide2.QtWidgets import *
 from PySide2.QtGui import QFont
-# keystone stuff
+# capstone/keystone stuff
+from capstone import *
 from keystone import *
 # binaryninja
 from binaryninja.interaction import show_message_box
@@ -20,51 +21,60 @@ hexchars = '0123456789ABCDEFabcdef'
 
 # (name, description, arch, mode, option)
 architecture_infos = [
-	('x16', 'X86 16bit, Intel syntax', KS_ARCH_X86, KS_MODE_16),
-	('x32', 'X86 32bit, Intel syntax', KS_ARCH_X86, KS_MODE_32),
-	('x64', 'X86 64bit, Intel syntax', KS_ARCH_X86, KS_MODE_64),
-	('x16att', 'X86 16bit, AT&T syntax', KS_ARCH_X86, KS_MODE_16),
-	('x32att', 'X86 32bit, AT&T syntax', KS_ARCH_X86, KS_MODE_32),
-	('x64att', 'X86 64bit, AT&T syntax', KS_ARCH_X86, KS_MODE_64),
-	('x16nasm', 'X86 16bit, NASM syntax', KS_ARCH_X86, KS_MODE_16),
-	('x32nasm', 'X86 32bit, NASM syntax', KS_ARCH_X86, KS_MODE_32),
-	('x64nasm', 'X86 64bit, NASM syntax', KS_ARCH_X86, KS_MODE_64),
-	('arm', 'ARM - little endian', KS_ARCH_ARM, KS_MODE_ARM),
-	('armbe', 'ARM - big endian', KS_ARCH_ARM, KS_MODE_ARM),
-	('thumb', 'Thumb - little endian', KS_ARCH_ARM, KS_MODE_THUMB),
-	('thumbbe', 'Thumb - big endian', KS_ARCH_ARM, KS_MODE_THUMB),
-	('armv8', 'ARM V8 - little endian', KS_ARCH_ARM, KS_MODE_ARM|KS_MODE_V8),
-	('armv8be', 'ARM V8 - big endian', KS_ARCH_ARM, KS_MODE_ARM|KS_MODE_V8),
-	('thumbv8', 'Thumb V8 - little endian', KS_ARCH_ARM, KS_MODE_THUMB|KS_MODE_V8),
-	('thumbv8be', 'Thumb V8 - big endian', KS_ARCH_ARM, KS_MODE_THUMB|KS_MODE_V8),
-	('arm64', 'AArch64', KS_ARCH_ARM64, 0),
-	('hexagon', 'Hexagon', KS_ARCH_HEXAGON, 0),
-	('mips', 'Mips - little endian', KS_ARCH_MIPS, KS_MODE_MIPS32),
-	('mipsbe', 'Mips - big endian', KS_ARCH_MIPS, KS_MODE_MIPS32),
-	('mips64', 'Mips64 - little endian', KS_ARCH_MIPS, KS_MODE_MIPS64),
-	('mips64be', 'Mips64 - big endian', KS_ARCH_MIPS, KS_MODE_MIPS64),
-	('ppc32be', 'PowerPC32 - big endian', KS_ARCH_PPC, KS_MODE_PPC32),
-	('ppc64', 'PowerPC64 - little endian', KS_ARCH_PPC, KS_MODE_PPC64),
-	('ppc64be', 'PowerPC64 - big endian', KS_ARCH_PPC, KS_MODE_PPC64),
-	('sparc', 'Sparc - little endian', KS_ARCH_SPARC, KS_MODE_SPARC32),
-	('sparcbe', 'Sparc - big endian', KS_ARCH_SPARC, KS_MODE_SPARC32),
-	('sparc64be', 'Sparc64 - big endian', KS_ARCH_SPARC, KS_MODE_SPARC64),
-	('systemz', 'SystemZ (S390x)', KS_ARCH_SYSTEMZ, 0),
-	('evm', 'Ethereum Virtual Machine', KS_ARCH_EVM, 0)
+	('x16', 'X86 16bit, Intel syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
+	('x32', 'X86 32bit, Intel syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
+	('x64', 'X86 64bit, Intel syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
+	('x16att', 'X86 16bit, AT&T syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
+	('x32att', 'X86 32bit, AT&T syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
+	('x64att', 'X86 64bit, AT&T syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
+	('x16nasm', 'X86 16bit, NASM syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
+	('x32nasm', 'X86 32bit, NASM syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
+	('x64nasm', 'X86 64bit, NASM syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
+	('arm', 'ARM - little endian', CS_ARCH_ARM, CS_MODE_ARM, KS_ARCH_ARM, KS_MODE_ARM),
+	('armbe', 'ARM - big endian', CS_ARCH_ARM, CS_MODE_ARM, KS_ARCH_ARM, KS_MODE_ARM),
+	('thumb', 'Thumb - little endian', CS_ARCH_ARM, CS_MODE_THUMB, KS_ARCH_ARM, KS_MODE_THUMB),
+	('thumbbe', 'Thumb - big endian', CS_ARCH_ARM, CS_MODE_THUMB, KS_ARCH_ARM, KS_MODE_THUMB),
+	('armv8', 'ARM V8 - little endian', CS_ARCH_ARM, CS_MODE_ARM|CS_MODE_V8, KS_ARCH_ARM, KS_MODE_ARM|KS_MODE_V8),
+	('armv8be', 'ARM V8 - big endian', CS_ARCH_ARM, CS_MODE_ARM|CS_MODE_V8, KS_ARCH_ARM, KS_MODE_ARM|KS_MODE_V8),
+	('thumbv8', 'Thumb V8 - little endian', CS_ARCH_ARM, CS_MODE_THUMB|CS_MODE_V8, KS_ARCH_ARM, KS_MODE_THUMB|KS_MODE_V8),
+	('thumbv8be', 'Thumb V8 - big endian', CS_ARCH_ARM, CS_MODE_THUMB|CS_MODE_V8, KS_ARCH_ARM, KS_MODE_THUMB|KS_MODE_V8),
+	('arm64', 'AArch64', CS_ARCH_ARM64, 0, KS_ARCH_ARM64, 0),
+	('hexagon', 'Hexagon', None, 0, KS_ARCH_HEXAGON, 0),
+	('mips', 'Mips - little endian', CS_ARCH_MIPS, CS_MODE_MIPS32, KS_ARCH_MIPS, KS_MODE_MIPS32),
+	('mipsbe', 'Mips - big endian', CS_ARCH_MIPS, CS_MODE_MIPS32, KS_ARCH_MIPS, KS_MODE_MIPS32),
+	('mips64', 'Mips64 - little endian', CS_ARCH_MIPS, CS_MODE_MIPS64, KS_ARCH_MIPS, KS_MODE_MIPS64),
+	('mips64be', 'Mips64 - big endian', CS_ARCH_MIPS, CS_MODE_MIPS64, KS_ARCH_MIPS, KS_MODE_MIPS64),
+	('ppc32be', 'PowerPC32 - big endian', CS_ARCH_PPC, CS_MODE_32, KS_ARCH_PPC, KS_MODE_PPC32),
+	('ppc64', 'PowerPC64 - little endian', CS_ARCH_PPC, CS_MODE_64, KS_ARCH_PPC, KS_MODE_PPC64),
+	('ppc64be', 'PowerPC64 - big endian', CS_ARCH_PPC, CS_MODE_64, KS_ARCH_PPC, KS_MODE_PPC64),
+	('sparc', 'Sparc - little endian', CS_ARCH_SPARC, 0, KS_ARCH_SPARC, KS_MODE_SPARC32),
+	('sparcbe', 'Sparc - big endian', CS_ARCH_SPARC, 0, KS_ARCH_SPARC, KS_MODE_SPARC32),
+	('sparc64be', 'Sparc64 - big endian', None, 0, KS_ARCH_SPARC, KS_MODE_SPARC64),
+	('systemz', 'SystemZ (S390x)', None, 0, KS_ARCH_SYSTEMZ, 0),
+	('evm', 'Ethereum Virtual Machine', CS_ARCH_EVM, 0, KS_ARCH_EVM, 0)
 ]
 
-# map architecture name to keystone context
+# map architecture names (capstone namespace) to capstone/keystone context
+architecture_to_cs = {}
 architecture_to_ks = {}
-for (name, descr, arch_const, mode_const) in architecture_infos:
+for (name, descr, cs_arch, cs_mode, ks_arch, ks_mode) in architecture_infos:
 	# default is little endian
 	# decide whether to set big endian
 	if name.endswith('be'):
-		mode_const |= KS_MODE_BIG_ENDIAN
+		cs_mode |= CS_MODE_BIG_ENDIAN
+		ks_mode |= KS_MODE_BIG_ENDIAN
 	else:
-		mode_const |= KS_MODE_LITTLE_ENDIAN
+		cs_mode |= CS_MODE_LITTLE_ENDIAN
+		ks_mode |= KS_MODE_LITTLE_ENDIAN
 
-	# initialize architecture
-	ks = Ks(arch_const, mode_const)
+	# initialize architecture\
+	(cs, ks) = (None, None)
+	if cs_arch != None:
+		print('Cs() on %s %s' % (name, descr))
+		cs = Cs(cs_arch, cs_mode)
+		print(cs)
+	#print('Ks() on %s %s' % (name, descr))
+	ks = Ks(ks_arch, ks_mode)
 
 	# set special syntax if indicated
 	if 'AT&T syntax' in descr:
@@ -74,6 +84,7 @@ for (name, descr, arch_const, mode_const) in architecture_infos:
 		#ks_option(KS_OPT_SYNTAX, KS_OPT_SYNTAX_NASM)
 		ks.syntax = KS_OPT_SYNTAX_NASM
 
+	architecture_to_cs[name] = cs
 	architecture_to_ks[name] = ks
 
 # map binary ninja architecture name to ks architecture name
@@ -158,6 +169,8 @@ def get_invalid_addr(bview, addr):
 			return end
 	raise Exception('0x%X is not a valid address' % addr)
 
+# disassemble using binaryninja
+# returns (<instruction_string>, <instruction_length>)
 def disassemble_binja_single(bview, addr):
 	end = get_invalid_addr(bview, addr)
 	length = min(16, end - addr)
@@ -165,10 +178,23 @@ def disassemble_binja_single(bview, addr):
 	(tokens, length) = bview.arch.get_instruction_text(data, addr)
 	if not tokens or not length:
 		return (None, None)
-		raise Exception('disassembly of %s failed' % str(data))
+		#raise Exception('disassembly of %s failed' % str(data))
 	strs = [t.text for t in tokens]
 	strs = [' ' if s.isspace() else s for s in strs]
 	return (''.join(strs), length)
+
+# disassemble using capstone
+# returns (<instruction_string>, <instruction_length>)
+def disassemble_capstone_single(bview, addr):
+	end = get_invalid_addr(bview, addr)
+	length = min(16, end - addr)
+	data = bview.read(addr, length)
+	arch_name = binja_to_ks[bview.arch.name]
+	md = architecture_to_cs[arch_name]
+	(addr, size, mnemonic, op_str) = next(md.disasm_lite(data, addr, 1))
+	if not size:
+		return (None, None)
+	return (mnemonic + ' ' + op_str, length)
 
 # get length of instruction at addr
 def disassemble_length(bview, addr):
@@ -322,7 +348,7 @@ class AssembleTab(QWidget):
 		#----------------
 
 		# default architecture dropdown in assemble
-		for (name, descr, arch_const, mode_const) in architecture_infos:
+		for (name, descr, _, _, _, _) in architecture_infos:
 			line = '%s: %s' % (name, descr)
 			self.qcb_arch.addItem(line)
 
@@ -336,7 +362,7 @@ class AssembleTab(QWidget):
 		# default assembly
 		ok = False
 		try:
-			(instxt, length) = disassemble_binja_single(self.bv, context.address)
+			(instxt, length) = disassemble_capstone_single(self.bv, context.address)
 			if not instxt:
 				raise Exception('disassembly failed')
 			self.qle_assembly.setText(instxt)

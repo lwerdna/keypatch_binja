@@ -24,7 +24,7 @@
       "Linux": ""
    },
    "dependencies": {
-       "pip": ["keystone-engine"]
+       "pip": ["keystone-engine", "capstone"]
    },   
    "version": "1.0",
    "minimumbinaryninjaversion": 2660
