@@ -219,11 +219,30 @@ def fixup(bview, assembly):
 def get_nop(arch):
 	if arch in ['x16', 'x32', 'x64', 'x16att', 'x32att', 'x64att', 'x16nasm', 'x32nasm', 'x64nasm']:
 		return b'\x90'
+	elif arch in ['arm', 'armv8']:
+		return b'\x00\xf0\x20\xe3'
+	elif arch in ['armbe', 'armv8be']:
+		return b'\xe3\x20\xf0\x00'
 	elif arch in ['thumb', 'thumbv8']:
 		return b'\x00\xbf'
 	elif arch in ['thumbbe', 'thumbv8be']:
 		return b'\xbf\x00'
-	raise Exception('bad architecture name: %s' % bview.arch.name)
+	elif arch in ['arm64']
+		return b'\x1f\x20\x03\xd5'
+	elif arch in ['hexagon']:
+		return b'\x00\xc0\x00\x7f'
+	elif arch in ['mips', 'mipsbe', 'mips64', 'mips64be']:
+		return b'\x00\x00\x00\x00'
+	elif arch in ['ppc64']:
+		return b'\x00\x00\x00\x60'
+	elif arch in ['ppc32be', 'ppc64be']:
+		return b'\x60\x00\x00\x00'
+	elif arch in ['sparc']:
+		return b'\x00\x00\x00\x01'
+	elif arch in ['sparcbe', 'sparc64be']:
+		return b'\x01\x00\x00\x00'
+
+	raise Exception('no NOP for architecture: %s' % arch)
 
 #------------------------------------------------------------------------------
 # GUI
