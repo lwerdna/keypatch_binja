@@ -200,17 +200,38 @@ def fixup(bview, assembly):
 
 	# collect substitutions we'll make
 	substitutions = []
+
+	# loop over every word character token
 	for m in re.finditer(r'\w+', assembly):
 		if m.start == 0: continue # do not replace mnemonic
 		symname = m.group(0)
-		if symname in reserved: continue # do not replace reserved words
-		if not (symname in bview.symbols and hasattr(bview.symbols[symname], 'address')):
+
+		# is reserved word? ignore
+		if symname in reserved:
 			continue
-		substitutions.append(symname)
+
+		# is it just a hex constant? ignore
+		if re.match(r'^0x[a-fA-F0-9]+$', symname):
+			continue
+
+		# is in symbols? replace with first available address
+		if symname in bview.symbols:
+			# multiple symbols at given address possible
+			for sym in bview.symbols[symname]:
+				if hasattr(sym, 'address'):
+					substitutions.append((sym.name, sym.address))
+					break
+
+		# is a data variable?
+		m = re.match(r'^data_([a-fA-F0-9]+)$', symname)
+		if m:
+			addr = int(m.group(1), 16)
+			if addr in bview.data_vars:
+				substitutions.append((symname, addr))
 
 	# apply substitutions
-	for s in substitutions:
-		assembly = assembly.replace(s, hex(bview.symbols[s].address))
+	for (name, addr) in substitutions:
+		assembly = assembly.replace(name, hex(addr))
 
 	# done
 	return assembly
@@ -227,7 +248,7 @@ def get_nop(arch):
 		return b'\x00\xbf'
 	elif arch in ['thumbbe', 'thumbv8be']:
 		return b'\xbf\x00'
-	elif arch in ['arm64']
+	elif arch in ['arm64']:
 		return b'\x1f\x20\x03\xd5'
 	elif arch in ['hexagon']:
 		return b'\x00\xc0\x00\x7f'
