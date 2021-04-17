@@ -70,9 +70,7 @@ for (name, descr, cs_arch, cs_mode, ks_arch, ks_mode) in architecture_infos:
 	# initialize architecture\
 	(cs, ks) = (None, None)
 	if cs_arch != None:
-		print('Cs() on %s %s' % (name, descr))
 		cs = Cs(cs_arch, cs_mode)
-		print(cs)
 	#print('Ks() on %s %s' % (name, descr))
 	ks = Ks(ks_arch, ks_mode)
 
@@ -149,6 +147,14 @@ font_mono.setStyleHint(QFont.TypeWriter)
 # utilities
 #------------------------------------------------------------------------------
 
+def bv_to_arch(bview):
+	# sometimes the binary view has no arch, like when File->New->Binary Data
+	if bview.arch != None:
+		return bview.arch.name
+
+	# return x64 by default
+	return 'x86_64'
+
 # test if given address is valid binaryview address, by searching sections
 def is_valid_addr(bview, addr):
 	for sname in bview.sections:
@@ -189,7 +195,7 @@ def disassemble_capstone_single(bview, addr):
 	end = get_invalid_addr(bview, addr)
 	length = min(16, end - addr)
 	data = bview.read(addr, length)
-	arch_name = binja_to_ks[bview.arch.name]
+	arch_name = binja_to_ks[bv_to_arch(bview)]
 	md = architecture_to_cs[arch_name]
 	(addr, size, mnemonic, op_str) = next(md.disasm_lite(data, addr, 1))
 	if not size:
@@ -222,7 +228,7 @@ def strbytes_pretty(string):
 	return ' '.join(['%02X'%ord(x) for x in string])
 
 def fixup(bview, assembly):
-	reserved = arch_to_reserved[bview.arch.name]
+	reserved = arch_to_reserved[bv_to_arch(bview)]
 
 	# collect substitutions we'll make
 	substitutions = []
@@ -352,7 +358,7 @@ class AssembleTab(QWidget):
 			line = '%s: %s' % (name, descr)
 			self.qcb_arch.addItem(line)
 
-		bv_arch_name = context.binaryView.arch.name
+		bv_arch_name = bv_to_arch(context.binaryView)
 		ks_arch_name = binja_to_ks.get(bv_arch_name, 'x64')
 		self.qcb_arch.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
 
@@ -553,7 +559,7 @@ class FillRangeTab(QWidget):
 		btn_fill.clicked.connect(self.fill)
 
 		# set defaults
-		nop = get_nop(binja_to_ks[self.bv.arch.name])
+		nop = get_nop(binja_to_ks[bv_to_arch(self.bv)])
 		if nop:
 			self.qle_bytes.setText(bytes_to_str(nop))
 
