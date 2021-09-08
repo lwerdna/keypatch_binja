@@ -5,8 +5,8 @@ import re
 import sys
 import math
 # Qt stuff
-from PySide2.QtWidgets import *
-from PySide2.QtGui import QFont
+from PySide6.QtWidgets import *
+from PySide6.QtGui import QFont
 # capstone/keystone stuff
 from capstone import *
 from keystone import *
@@ -67,7 +67,7 @@ for (name, descr, cs_arch, cs_mode, ks_arch, ks_mode) in architecture_infos:
 		cs_mode |= CS_MODE_LITTLE_ENDIAN
 		ks_mode |= KS_MODE_LITTLE_ENDIAN
 
-	# initialize architecture\
+	# initialize architecture
 	(cs, ks) = (None, None)
 	if cs_arch != None:
 		cs = Cs(cs_arch, cs_mode)
@@ -149,49 +149,69 @@ font_mono.setStyleHint(QFont.TypeWriter)
 
 def bv_to_arch(bview):
 	# sometimes the binary view has no arch, like when File->New->Binary Data
-	if bview.arch != None:
-		return bview.arch.name
+	if bview.arch == None:
+		# return x64 by default
+		return 'x86_64'
 
-	# return x64 by default
-	return 'x86_64'
+	return bview.arch.name
 
-# test if given address is valid binaryview address, by searching sections
+
+# test if given address is valid binaryview address
 def is_valid_addr(bview, addr):
-	for sname in bview.sections:
-		section = bview.sections[sname]
-		start = section.start
-		end = section.start + len(section)
-		if addr >= start and addr < end:
-			return True
-	return False
+	# if the binaryview has sections, validity is whether the address is in a section
+	if bview.sections:
+		for sname in bview.sections:
+			section = bview.sections[sname]
+			start = section.start
+			end = section.start + len(section)
+			if addr >= start and addr < end:
+				return True
+		return False
+	# otherwise
+	else:
+		return addr >= bview.start and addr < (bview.start + len(bview))
 
 # given a valid address, return least address after the valid that is invalid
 def get_invalid_addr(bview, addr):
-	for sname in bview.sections:
-		section = bview.sections[sname]
-		start = section.start
-		end = section.start + len(section)
-		if addr >= start and addr < end:
-			return end
-	raise Exception('0x%X is not a valid address' % addr)
+	if not is_valid_addr(bview, addr):
+		return None
+
+	# if the binaryview has sections, next invalid address is end of current section
+	if bview.sections:
+		for sname in bview.sections:
+			section = bview.sections[sname]
+			start = section.start
+			end = section.start + len(section)
+			if addr >= start and addr < end:
+				return end
+	# otherwise
+	else:
+		return bview.start + len(bv)
 
 # disassemble using binaryninja
 # returns (<instruction_string>, <instruction_length>)
 def disassemble_binja_single(bview, addr):
+	errval = (None, None)
+	if not is_valid_addr(bview, addr):
+		return errval
 	end = get_invalid_addr(bview, addr)
+	if end == None:
+		return errval
 	length = min(16, end - addr)
 	data = bview.read(addr, length)
 	(tokens, length) = bview.arch.get_instruction_text(data, addr)
 	if not tokens or not length:
-		return (None, None)
-		#raise Exception('disassembly of %s failed' % str(data))
+		return errval
 	strs = [t.text for t in tokens]
 	strs = [' ' if s.isspace() else s for s in strs]
 	return (''.join(strs), length)
 
 # disassemble using capstone
 # returns (<instruction_string>, <instruction_length>)
+# returns (None, None) if unable to disassemble
 def disassemble_capstone_single(bview, addr):
+	if not is_valid_addr(bview, addr):
+		return (None, None)
 	end = get_invalid_addr(bview, addr)
 	length = min(16, end - addr)
 	data = bview.read(addr, length)
@@ -203,18 +223,10 @@ def disassemble_capstone_single(bview, addr):
 	return (mnemonic + ' ' + op_str, length)
 
 # get length of instruction at addr
+# returns None if unable to disassemble
 def disassemble_length(bview, addr):
 	(instxt, length) = disassemble_binja_single(bview, addr)
 	return length
-
-# get length of instruction sequence until limit size
-def disassemble_length_until(bview, addr, limit):
-	result = 0
-	while result < limit:
-		tmp = disassemble_length(bview, addr)
-		addr += tmp
-		result += tmp
-	return result
 
 def error(msg):
 	show_message_box('KEYPATCH', msg, \
@@ -366,21 +378,15 @@ class AssembleTab(QWidget):
 		self.qle_address.setText(hex(self.context.address))
 
 		# default assembly
-		ok = False
-		try:
-			(instxt, length) = disassemble_capstone_single(self.bv, context.address)
-			if not instxt:
-				raise Exception('disassembly failed')
+		(instxt, length) = disassemble_capstone_single(self.bv, context.address)
+		if instxt:
 			self.qle_assembly.setText(instxt)
 			self.qle_fixedup.setText(instxt)
 			self.qle_datasz.setText('%d' % length)
 			data = context.binaryView.read(context.address, length)
 			self.qle_data.setText(' '.join(['%02X'%x for x in data]))
 			ok = True
-		except Exception as e:
-			print(e)
-			pass
-		if not ok:
+		else:
 			self.qle_assembly.setText('nop')
 
 		# assembly fields
@@ -446,7 +452,7 @@ class AssembleTab(QWidget):
 			# pad with nops
 			if self.check_nops.isChecked():
 				length = disassemble_length(self.bv, self.addr())
-				if length and length > len(data):
+				if length != None and length > len(data):
 					nop = get_nop(self.arch())
 					sled = (length // len(nop)) * nop
 					sled = list(sled) # b'\xAA' -> [0xAA]
@@ -472,7 +478,8 @@ class AssembleTab(QWidget):
 		try:
 			if self.check_save_original.isChecked():
 				(instxt, length) = disassemble_binja_single(self.bv, self.addr())
-				comment = instxt
+				if instxt and length:
+					comment = instxt
 		except Exception as e:
 			print(e)
 			pass
@@ -572,7 +579,9 @@ class FillRangeTab(QWidget):
 		self.chk_manual.setChecked(True)
 
 		self.qle_address.setText(hex(self.context.address))
-		self.qle_end.setText(hex(get_invalid_addr(self.bv, self.context.address)))
+		end = get_invalid_addr(self.bv, self.context.address)
+		if end != None:
+			self.qle_end.setText(hex(end))
 		btn_fill.setDefault(True)
 
 	def encoding_checked_toggle(self, is_check):
