@@ -3,9 +3,9 @@ try:
 
 	from . import keypatch
 
-	UIAction.registerAction("KEYPATCH")
-	UIActionHandler.globalActions().bindAction("KEYPATCH", UIAction(keypatch.launch_keypatch))
-	Menu.mainMenu("Tools").addAction("KEYPATCH", "KEYPATCH")
+	UIAction.registerAction("Keypatch")
+	UIActionHandler.globalActions().bindAction("Keypatch", UIAction(keypatch.launch_keypatch))
+	Menu.mainMenu("Tools").addAction("Keypatch", "Keypatch")
 except ModuleNotFoundError:
 	# probably being loaded by headless BinaryNinja
 	pass
