@@ -777,23 +777,27 @@ class SearchTab(QWidget):
 		if self.chk_manual.isChecked():
 			sexpr = self.qle_bytes.text()
 
-		# convert to binary regex
+		# get rid of bad chars and whitespace in input line
 		sexpr = sexpr.strip()
 		sexpr = re.sub(r'\s+', '', sexpr)
-		regex = ''
+
+		# parse regex input line
+
+		my_encoding = 'utf8'
+		regex = b''
 		while sexpr:
 			if len(sexpr) >= 2 and sexpr[0] in hexchars and sexpr[1] in hexchars:
-				regex += chr(int(sexpr[0:2], 16))
+				regex += re.escape(bytes.fromhex(sexpr[0:2]))
 				sexpr = sexpr[2:]
 			else:
-				regex += sexpr[0]
+				regex += sexpr[0:1].encode(my_encoding)
 				sexpr = sexpr[1:]
 
 		# validate regex
 		try:
 			regobj = re.compile(regex)
 		except Exception:
-			error('invalid regex: %s' % sexpr)
+			error('invalid regex')
 			return
 
 		# clear old results
@@ -810,10 +814,14 @@ class SearchTab(QWidget):
 			#print('searching section %s [0x%X, 0x%X)' % (sname, start, end))
 
 			# TODO: find better way
-			buf = ''.join([chr(x) for x in bview.read(start, end-start)])
+			# bview.read already bytes type ... no need to convert or copy bytes
+			buf = bview.read(start, end-start)
+
 			for m in regobj.finditer(buf):
 				addr = section.start + m.start()
-				info = '%s %08X: %s' % (sname.rjust(width), addr, strbytes_pretty(m.group()))
+
+				# m.group is bytes type
+				info = '%s %08X: %s' % (sname.rjust(width), addr, bytes_to_str(m.group()))
 				self.list_results.addItem(QListWidgetItem(info))
 
 	def results_clicked(self, item):
