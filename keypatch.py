@@ -217,8 +217,11 @@ def disassemble_capstone_single(bview, addr):
     data = bview.read(addr, length)
     arch_name = binja_to_ks[bv_to_arch(bview)]
     md = architecture_to_cs[arch_name]
-    (addr, size, mnemonic, op_str) = next(md.disasm_lite(data, addr, 1))
-    if not size:
+    try:
+        (addr, size, mnemonic, op_str) = next(md.disasm_lite(data, addr, 1))
+        if not size:
+            return (None, None)
+    except StopIteration:
         return (None, None)
     return (mnemonic + ' ' + op_str, length)
 
@@ -572,7 +575,7 @@ class FillRangeTab(QWidget):
 
         for (sname, section) in self.bv.sections.items():
             section = self.bv.sections[sname]
-            line = '%s [0x%X, 0x%X)' % (sname, section.start, section.start + len(section))
+            line = '%s [0x%X, 0x%X)' % (sname, section.start, section.start + section.length)
             self.qcb_sections.addItem(line)
 
         self.chk_encoding.setChecked(False)
@@ -810,7 +813,7 @@ class SearchTab(QWidget):
         for sname in bview.sections:
             section = bview.sections[sname]
             start = section.start
-            end = section.start + len(section)
+            end = section.start + section.length
             #print('searching section %s [0x%X, 0x%X)' % (sname, start, end))
 
             # TODO: find better way
