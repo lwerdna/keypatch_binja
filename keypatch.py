@@ -482,16 +482,17 @@ class AssembleTab(QWidget):
             if self.check_save_original.isChecked():
                 (instxt, length) = disassemble_binja_single(self.bv, self.addr())
                 if instxt and length:
-                    comment = instxt
+                    comment = 'previously: ' + instxt
         except Exception as e:
             print(e)
             pass
 
         try:
-            self.bv.write(self.addr(), data)
+            with self.bv.undoable_transaction():
+                self.bv.write(self.addr(), data)
 
-            if comment:
-                self.bv.set_comment_at(self.addr(), comment)
+                if comment:
+                    self.bv.set_comment_at(self.addr(), comment)
         except Exception as e:
             return
 
