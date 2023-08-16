@@ -163,7 +163,7 @@ def is_valid_addr(bview, addr):
         for sname in bview.sections:
             section = bview.sections[sname]
             start = section.start
-            end = section.start + len(section)
+            end = section.start + section.length
             if addr >= start and addr < end:
                 return True
         return False
