@@ -5,7 +5,7 @@ try:
 
     UIAction.registerAction("Keypatch")
     UIActionHandler.globalActions().bindAction("Keypatch", UIAction(keypatch.launch_keypatch))
-    Menu.mainMenu("Tools").addAction("Keypatch", "Keypatch")
+    Menu.mainMenu("Plugins").addAction("Keypatch", "Keypatch")
 except ModuleNotFoundError:
     # probably being loaded by headless BinaryNinja
     pass
