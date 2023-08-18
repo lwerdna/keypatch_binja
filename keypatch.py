@@ -1,58 +1,59 @@
 #!/usr/bin/env python
 
+import math
 # python stdlib stuff
 import re
-import sys
-import math
+
+from PySide6.QtGui import QFont
 # Qt stuff
 from PySide6.QtWidgets import *
-from PySide6.QtGui import QFont
+from binaryninja.enums import MessageBoxButtonSet, MessageBoxIcon
+# binaryninja
+from binaryninja.interaction import show_message_box
 # capstone/keystone stuff
 from capstone import *
 from keystone import *
-# binaryninja
-from binaryninja.interaction import show_message_box
-from binaryninja.enums import MessageBoxButtonSet, MessageBoxIcon
 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # lookups
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 hexchars = '0123456789ABCDEFabcdef'
 
 # (name, description, arch, mode, option)
-architecture_infos = [
-    ('x16', 'X86 16bit, Intel syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
-    ('x32', 'X86 32bit, Intel syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
-    ('x64', 'X86 64bit, Intel syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
-    ('x16att', 'X86 16bit, AT&T syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
-    ('x32att', 'X86 32bit, AT&T syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
-    ('x64att', 'X86 64bit, AT&T syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
-    ('x16nasm', 'X86 16bit, NASM syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
-    ('x32nasm', 'X86 32bit, NASM syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
-    ('x64nasm', 'X86 64bit, NASM syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
-    ('arm', 'ARM - little endian', CS_ARCH_ARM, CS_MODE_ARM, KS_ARCH_ARM, KS_MODE_ARM),
-    ('armbe', 'ARM - big endian', CS_ARCH_ARM, CS_MODE_ARM, KS_ARCH_ARM, KS_MODE_ARM),
-    ('thumb', 'Thumb - little endian', CS_ARCH_ARM, CS_MODE_THUMB, KS_ARCH_ARM, KS_MODE_THUMB),
-    ('thumbbe', 'Thumb - big endian', CS_ARCH_ARM, CS_MODE_THUMB, KS_ARCH_ARM, KS_MODE_THUMB),
-    ('armv8', 'ARM V8 - little endian', CS_ARCH_ARM, CS_MODE_ARM|CS_MODE_V8, KS_ARCH_ARM, KS_MODE_ARM|KS_MODE_V8),
-    ('armv8be', 'ARM V8 - big endian', CS_ARCH_ARM, CS_MODE_ARM|CS_MODE_V8, KS_ARCH_ARM, KS_MODE_ARM|KS_MODE_V8),
-    ('thumbv8', 'Thumb V8 - little endian', CS_ARCH_ARM, CS_MODE_THUMB|CS_MODE_V8, KS_ARCH_ARM, KS_MODE_THUMB|KS_MODE_V8),
-    ('thumbv8be', 'Thumb V8 - big endian', CS_ARCH_ARM, CS_MODE_THUMB|CS_MODE_V8, KS_ARCH_ARM, KS_MODE_THUMB|KS_MODE_V8),
-    ('arm64', 'AArch64', CS_ARCH_ARM64, 0, KS_ARCH_ARM64, 0),
-    ('hexagon', 'Hexagon', None, 0, KS_ARCH_HEXAGON, 0),
-    ('mips', 'Mips - little endian', CS_ARCH_MIPS, CS_MODE_MIPS32, KS_ARCH_MIPS, KS_MODE_MIPS32),
-    ('mipsbe', 'Mips - big endian', CS_ARCH_MIPS, CS_MODE_MIPS32, KS_ARCH_MIPS, KS_MODE_MIPS32),
-    ('mips64', 'Mips64 - little endian', CS_ARCH_MIPS, CS_MODE_MIPS64, KS_ARCH_MIPS, KS_MODE_MIPS64),
-    ('mips64be', 'Mips64 - big endian', CS_ARCH_MIPS, CS_MODE_MIPS64, KS_ARCH_MIPS, KS_MODE_MIPS64),
-    ('ppc32be', 'PowerPC32 - big endian', CS_ARCH_PPC, CS_MODE_32, KS_ARCH_PPC, KS_MODE_PPC32),
-    ('ppc64', 'PowerPC64 - little endian', CS_ARCH_PPC, CS_MODE_64, KS_ARCH_PPC, KS_MODE_PPC64),
-    ('ppc64be', 'PowerPC64 - big endian', CS_ARCH_PPC, CS_MODE_64, KS_ARCH_PPC, KS_MODE_PPC64),
-    ('sparc', 'Sparc - little endian', CS_ARCH_SPARC, 0, KS_ARCH_SPARC, KS_MODE_SPARC32),
-    ('sparcbe', 'Sparc - big endian', CS_ARCH_SPARC, 0, KS_ARCH_SPARC, KS_MODE_SPARC32),
-    ('sparc64be', 'Sparc64 - big endian', None, 0, KS_ARCH_SPARC, KS_MODE_SPARC64),
-    ('systemz', 'SystemZ (S390x)', None, 0, KS_ARCH_SYSTEMZ, 0),
-    ('evm', 'Ethereum Virtual Machine', CS_ARCH_EVM, 0, KS_ARCH_EVM, 0)
-]
+architecture_infos = [('x16', 'X86 16bit, Intel syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
+                      ('x32', 'X86 32bit, Intel syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
+                      ('x64', 'X86 64bit, Intel syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
+                      ('x16att', 'X86 16bit, AT&T syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
+                      ('x32att', 'X86 32bit, AT&T syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
+                      ('x64att', 'X86 64bit, AT&T syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
+                      ('x16nasm', 'X86 16bit, NASM syntax', CS_ARCH_X86, CS_MODE_16, KS_ARCH_X86, KS_MODE_16),
+                      ('x32nasm', 'X86 32bit, NASM syntax', CS_ARCH_X86, CS_MODE_32, KS_ARCH_X86, KS_MODE_32),
+                      ('x64nasm', 'X86 64bit, NASM syntax', CS_ARCH_X86, CS_MODE_64, KS_ARCH_X86, KS_MODE_64),
+                      ('arm', 'ARM - little endian', CS_ARCH_ARM, CS_MODE_ARM, KS_ARCH_ARM, KS_MODE_ARM),
+                      ('armbe', 'ARM - big endian', CS_ARCH_ARM, CS_MODE_ARM, KS_ARCH_ARM, KS_MODE_ARM),
+                      ('thumb', 'Thumb - little endian', CS_ARCH_ARM, CS_MODE_THUMB, KS_ARCH_ARM, KS_MODE_THUMB),
+                      ('thumbbe', 'Thumb - big endian', CS_ARCH_ARM, CS_MODE_THUMB, KS_ARCH_ARM, KS_MODE_THUMB),
+                      ('armv8', 'ARM V8 - little endian', CS_ARCH_ARM, CS_MODE_ARM | CS_MODE_V8, KS_ARCH_ARM,
+                       KS_MODE_ARM | KS_MODE_V8),
+                      ('armv8be', 'ARM V8 - big endian', CS_ARCH_ARM, CS_MODE_ARM | CS_MODE_V8, KS_ARCH_ARM,
+                       KS_MODE_ARM | KS_MODE_V8), (
+                          'thumbv8', 'Thumb V8 - little endian', CS_ARCH_ARM, CS_MODE_THUMB | CS_MODE_V8, KS_ARCH_ARM,
+                          KS_MODE_THUMB | KS_MODE_V8), (
+                          'thumbv8be', 'Thumb V8 - big endian', CS_ARCH_ARM, CS_MODE_THUMB | CS_MODE_V8, KS_ARCH_ARM,
+                          KS_MODE_THUMB | KS_MODE_V8), ('arm64', 'AArch64', CS_ARCH_ARM64, 0, KS_ARCH_ARM64, 0),
+                      ('hexagon', 'Hexagon', None, 0, KS_ARCH_HEXAGON, 0),
+                      ('mips', 'Mips - little endian', CS_ARCH_MIPS, CS_MODE_MIPS32, KS_ARCH_MIPS, KS_MODE_MIPS32),
+                      ('mipsbe', 'Mips - big endian', CS_ARCH_MIPS, CS_MODE_MIPS32, KS_ARCH_MIPS, KS_MODE_MIPS32),
+                      ('mips64', 'Mips64 - little endian', CS_ARCH_MIPS, CS_MODE_MIPS64, KS_ARCH_MIPS, KS_MODE_MIPS64),
+                      ('mips64be', 'Mips64 - big endian', CS_ARCH_MIPS, CS_MODE_MIPS64, KS_ARCH_MIPS, KS_MODE_MIPS64),
+                      ('ppc32be', 'PowerPC32 - big endian', CS_ARCH_PPC, CS_MODE_32, KS_ARCH_PPC, KS_MODE_PPC32),
+                      ('ppc64', 'PowerPC64 - little endian', CS_ARCH_PPC, CS_MODE_64, KS_ARCH_PPC, KS_MODE_PPC64),
+                      ('ppc64be', 'PowerPC64 - big endian', CS_ARCH_PPC, CS_MODE_64, KS_ARCH_PPC, KS_MODE_PPC64),
+                      ('sparc', 'Sparc - little endian', CS_ARCH_SPARC, 0, KS_ARCH_SPARC, KS_MODE_SPARC32),
+                      ('sparcbe', 'Sparc - big endian', CS_ARCH_SPARC, 0, KS_ARCH_SPARC, KS_MODE_SPARC32),
+                      ('sparc64be', 'Sparc64 - big endian', None, 0, KS_ARCH_SPARC, KS_MODE_SPARC64),
+                      ('systemz', 'SystemZ (S390x)', None, 0, KS_ARCH_SYSTEMZ, 0),
+                      ('evm', 'Ethereum Virtual Machine', CS_ARCH_EVM, 0, KS_ARCH_EVM, 0)]
 
 # map architecture names (capstone namespace) to capstone/keystone context
 architecture_to_cs = {}
@@ -71,15 +72,15 @@ for (name, descr, cs_arch, cs_mode, ks_arch, ks_mode) in architecture_infos:
     (cs, ks) = (None, None)
     if cs_arch != None:
         cs = Cs(cs_arch, cs_mode)
-    #print('Ks() on %s %s' % (name, descr))
+    # print('Ks() on %s %s' % (name, descr))
     ks = Ks(ks_arch, ks_mode)
 
     # set special syntax if indicated
     if 'AT&T syntax' in descr:
-        #ks_option(KS_OPT_SYNTAX, KS_OPT_SYNTAX_ATT)
+        # ks_option(KS_OPT_SYNTAX, KS_OPT_SYNTAX_ATT)
         ks.syntax = KS_OPT_SYNTAX_ATT
     if name.endswith('nasm'):
-        #ks_option(KS_OPT_SYNTAX, KS_OPT_SYNTAX_NASM)
+        # ks_option(KS_OPT_SYNTAX, KS_OPT_SYNTAX_NASM)
         ks.syntax = KS_OPT_SYNTAX_NASM
 
     architecture_to_cs[name] = cs
@@ -87,65 +88,41 @@ for (name, descr, cs_arch, cs_mode, ks_arch, ks_mode) in architecture_infos:
 
 # map binary ninja architecture name to ks architecture name
 # [x.name for x in binaryninja.Architecture]
-binja_to_ks = {
-    'aarch64': 'arm64',
-    'armv7': 'arm',
-    'armv7eb': 'armbe',
-    'thumb2': 'thumb',
-    'thumb2eb': 'thumbbe',
-    'mipsel32': 'mips',
-    'mips32': 'mipsbe',
-    'ppc': 'ppc32be',
-    'ppc_le': 'ERROR',
-    'ppc64': 'ppc64be',
-    'ppc64_le': 'ppc64',
-    'sh4': 'ERROR',
-    'x86_16': 'x16nasm',
-    'x86': 'x32nasm',
-    'x86_64': 'x64nasm'
-}
+binja_to_ks = {'aarch64': 'arm64', 'armv7': 'arm', 'armv7eb': 'armbe', 'thumb2': 'thumb', 'thumb2eb': 'thumbbe',
+               'mipsel32': 'mips', 'mips32': 'mipsbe', 'ppc': 'ppc32be', 'ppc_le': 'ERROR', 'ppc64': 'ppc64be',
+               'ppc64_le': 'ppc64', 'sh4': 'ERROR', 'x86_16': 'x16nasm', 'x86': 'x32nasm', 'x86_64': 'x64nasm'}
 
 # these words won't be substituted in assembly fixup
 arch_to_reserved = {
-    'aarch64': [ 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7',
-                 'r8', 'r9','r10','r11','r12','r13','r14','r15',
-                'r16','r17','r18','r19','r20','r21','r22','r23',
-                'r24','r25','r26','r27','r28','r29','r30','r31'
-                 'w0', 'w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7',
-                 'w8', 'w9','w10','w11','w12','w13','w14','w15',
-                'w16','w17','w18','w19','w20','w21','w22','w23',
-                'w24','w25','w26','w27','w28','w29','w30','w31',
-                 'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7',
-                 'x8', 'x9','x10','x11','x12','x13','x14','x15',
-                'x16','x17','x18','x19','x20','x21','x22','x23',
-                'x24','x25','x26','x27','x28','x29','x30','x31'],
-    'armv7': ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9','r10','r11','r12',
-                'sp', 'lr', 'pc', 'apsr'],
-    'mips32': [],
-    'ppc': [],
-    #'ppc_le',
-    'ppc64': [],
-    #'sh4',
-    'x86_16': [ 'ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di',
-                'ah', 'al', 'ch', 'cl', 'dh', 'dl', 'bh', 'bl',
-                'ss', 'cs', 'ds', 'es']
-}
+    'aarch64': ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15',
+                'r16', 'r17', 'r18', 'r19', 'r20', 'r21', 'r22', 'r23', 'r24', 'r25', 'r26', 'r27', 'r28', 'r29', 'r30',
+                'r31'
+                'w0', 'w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15',
+                'w16', 'w17', 'w18', 'w19', 'w20', 'w21', 'w22', 'w23', 'w24', 'w25', 'w26', 'w27', 'w28', 'w29', 'w30',
+                'w31', 'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9', 'x10', 'x11', 'x12', 'x13', 'x14',
+                'x15', 'x16', 'x17', 'x18', 'x19', 'x20', 'x21', 'x22', 'x23', 'x24', 'x25', 'x26', 'x27', 'x28', 'x29',
+                'x30', 'x31'],
+    'armv7': ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'sp', 'lr', 'pc',
+              'apsr'], 'mips32': [], 'ppc': [],  # 'ppc_le',
+    'ppc64': [],  # 'sh4',
+    'x86_16': ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di', 'ah', 'al', 'ch', 'cl', 'dh', 'dl', 'bh', 'bl', 'ss',
+               'cs', 'ds', 'es']}
 arch_to_reserved['thumb2'] = arch_to_reserved['armv7']
 arch_to_reserved['thumb2eb'] = arch_to_reserved['thumb2']
 arch_to_reserved['armv7eb'] = arch_to_reserved['armv7']
 arch_to_reserved['mipsel32'] = arch_to_reserved['mips32']
 arch_to_reserved['ppc64_le'] = arch_to_reserved['ppc64']
-arch_to_reserved['x86'] = arch_to_reserved['x86_16'] + \
-                        ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi', 'fs', 'gs']
-arch_to_reserved['x86_64'] = arch_to_reserved['x86'] + \
-                        ['rax', 'rcx', 'rdx', 'rbx', 'rsp', 'rbp', 'rsi', 'rdi']
+arch_to_reserved['x86'] = arch_to_reserved['x86_16'] + ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi', 'fs',
+                                                        'gs']
+arch_to_reserved['x86_64'] = arch_to_reserved['x86'] + ['rax', 'rcx', 'rdx', 'rbx', 'rsp', 'rbp', 'rsi', 'rdi']
 
 font_mono = QFont('Courier New')
 font_mono.setStyleHint(QFont.TypeWriter)
 
-#------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # utilities
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 def bv_to_arch(bview):
     # sometimes the binary view has no arch, like when File->New->Binary Data
@@ -171,6 +148,7 @@ def is_valid_addr(bview, addr):
     else:
         return addr >= bview.start and addr < (bview.start + len(bview))
 
+
 # given a valid address, return least address after the valid that is invalid
 def get_invalid_addr(bview, addr):
     if not is_valid_addr(bview, addr):
@@ -187,6 +165,7 @@ def get_invalid_addr(bview, addr):
     # otherwise
     else:
         return bview.start + len(bv)
+
 
 # disassemble using binaryninja
 # returns (<instruction_string>, <instruction_length>)
@@ -206,6 +185,7 @@ def disassemble_binja_single(bview, addr):
     strs = [' ' if s.isspace() else s for s in strs]
     return (''.join(strs), length)
 
+
 # disassemble using capstone
 # returns (<instruction_string>, <instruction_length>)
 # returns (None, None) if unable to disassemble
@@ -223,7 +203,24 @@ def disassemble_capstone_single(bview, addr):
             return (None, None)
     except StopIteration:
         return (None, None)
-    return (mnemonic + ' ' + op_str, length)
+    # fixed bug , <instruction_length> is 'size',not 'length'
+    return (mnemonic + ' ' + op_str, size)
+
+
+# disassemble  data using capstone
+# returns (<instruction_string>, <instruction_length>)
+# returns (None, None) if unable to disassemble
+def disassemble_capstone_single_data(bview, data, addr):
+    arch_name = binja_to_ks[bv_to_arch(bview)]
+    md = architecture_to_cs[arch_name]
+    try:
+        (addr, size, mnemonic, op_str) = next(md.disasm_lite(data, addr, 1))
+        if not size:
+            return (None, None)
+    except StopIteration:
+        return (None, None)
+    return (mnemonic + ' ' + op_str, size)
+
 
 # get length of instruction at addr
 # returns None if unable to disassemble
@@ -231,16 +228,19 @@ def disassemble_length(bview, addr):
     (instxt, length) = disassemble_binja_single(bview, addr)
     return length
 
+
 def error(msg):
-    show_message_box('KEYPATCH', msg, \
-      MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
+    show_message_box('KEYPATCH', msg, MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
+
 
 # b'\xaa\xbb\xcc\xdd' -> 'AA BB CC DD'
 def bytes_to_str(data):
-    return ' '.join(['%02X'%x for x in data])
+    return ' '.join(['%02X' % x for x in data])
+
 
 def strbytes_pretty(string):
-    return ' '.join(['%02X'%ord(x) for x in string])
+    return ' '.join(['%02X' % ord(x) for x in string])
+
 
 def fixup(bview, assembly):
     reserved = arch_to_reserved[bv_to_arch(bview)]
@@ -250,7 +250,7 @@ def fixup(bview, assembly):
 
     # loop over every word character token
     for m in re.finditer(r'\w+', assembly):
-        if m.start == 0: continue # do not replace mnemonic
+        if m.start == 0: continue  # do not replace mnemonic
         symname = m.group(0)
 
         # is reserved word? ignore
@@ -283,6 +283,7 @@ def fixup(bview, assembly):
     # done
     return assembly
 
+
 # arch is keystone namespace
 def get_nop(arch):
     if arch in ['x16', 'x32', 'x64', 'x16att', 'x32att', 'x64att', 'x16nasm', 'x32nasm', 'x64nasm']:
@@ -312,9 +313,10 @@ def get_nop(arch):
 
     raise Exception('no NOP for architecture: %s' % arch)
 
-#------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # GUI
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 class AssembleTab(QWidget):
     def __init__(self, context, parent=None):
@@ -325,9 +327,9 @@ class AssembleTab(QWidget):
         # other QLineEntry widgets to receive bytes upon assembling
         self.qles_bytes = []
 
-        #----------------------------------------------------------------------
+        # ----------------------------------------------------------------------
         # assemble tab
-        #----------------------------------------------------------------------
+        # ----------------------------------------------------------------------
         layout = QVBoxLayout()
         self.setLayout(layout)
 
@@ -338,6 +340,9 @@ class AssembleTab(QWidget):
         form.addRow('Address:', self.qle_address)
         self.qle_assembly = QLineEdit()
         form.addRow('Assembly:', self.qle_assembly)
+        # Add a new QLineEdit to receive  bytes
+        self.edit_bytes = QLineEdit()
+        form.addRow('Edit Bytes:', self.edit_bytes)
         self.check_nops = QCheckBox('NOPs padding until next instruction boundary')
         form.addRow(self.check_nops)
         self.check_save_original = QCheckBox('Save original instructions in binja comment')
@@ -359,14 +364,15 @@ class AssembleTab(QWidget):
         layout.addWidget(btn_patch)
 
         # connect everything
-        self.qcb_arch.currentTextChanged.connect(self.reassemble)
-        self.qle_address.textChanged.connect(self.reassemble)
-        self.qle_assembly.textChanged.connect(self.reassemble)
+        self.qcb_arch.currentTextChanged.connect(self.re_assemble)
+        self.qle_address.textChanged.connect(self.re_assemble)
+        self.qle_assembly.textChanged.connect(self.re_assemble)
+        self.edit_bytes.textChanged.connect(self.re_disassemble)
         btn_patch.clicked.connect(self.patch)
 
-        #----------------
+        # ----------------
         # set defaults
-        #----------------
+        # ----------------
 
         # default architecture dropdown in assemble
         for (name, descr, _, _, _, _) in architecture_infos:
@@ -386,12 +392,13 @@ class AssembleTab(QWidget):
             self.qle_assembly.setText(instxt)
             self.qle_fixedup.setText(instxt)
             self.qle_datasz.setText('%d' % length)
-            data = context.binaryView.read(context.address, length)
-            self.qle_data.setText(' '.join(['%02X'%x for x in data]))
             ok = True
         else:
+            length = 10
             self.qle_assembly.setText('nop')
-
+        data = context.binaryView.read(context.address, length)
+        self.qle_data.setText(' '.join(['%02X' % x for x in data]))
+        self.edit_bytes.setText(self.qle_data.text())
         # assembly fields
         self.qle_data.setReadOnly(True)
         self.qle_data.setEnabled(False)
@@ -399,7 +406,6 @@ class AssembleTab(QWidget):
         self.qle_datasz.setEnabled(False)
         self.qle_fixedup.setReadOnly(True)
         self.qle_fixedup.setEnabled(False)
-
         # default
         self.check_nops.setChecked(True)
         self.check_save_original.setChecked(True)
@@ -437,7 +443,7 @@ class AssembleTab(QWidget):
 
     # qle_assembly -> fixup -> qle_data
     #
-    def reassemble(self):
+    def re_assemble(self):
         try:
             # get input
             (ks, assembly, addr) = (self.ks(), self.asm(), self.addr())
@@ -458,15 +464,43 @@ class AssembleTab(QWidget):
                 if length != None and length > len(data):
                     nop = get_nop(self.arch())
                     sled = (length // len(nop)) * nop
-                    sled = list(sled) # b'\xAA' -> [0xAA]
+                    sled = list(sled)  # b'\xAA' -> [0xAA]
                     data = data + sled[len(data):]
 
             # set
             self.qle_data.setText(bytes_to_str(data))
+            self.edit_bytes.setText(bytes_to_str(data))
             self.qle_datasz.setText(hex(len(data)))
 
         except ValueError:
             self.error('invalid address')
+        except KsError as e:
+            self.error(str(e))
+        except Exception as e:
+            self.error(str(e))
+
+    # Add a new function
+    # update the  self.qle_data.text() and self.qle_fixedup.text() through  self.edit_bytes.text()
+    def re_disassemble(self):
+        try:
+            # get input
+            addr = self.addr()
+            data = bytes.fromhex(self.edit_bytes.text())
+
+            (disasm, length) = disassemble_capstone_single_data(self.bv, data, addr)
+            # pad with nops
+            if self.check_nops.isChecked():
+                length = disassemble_length(self.bv, self.addr())
+                if length != None and length > len(data):
+                    nop = get_nop(self.arch())
+                    sled = (length // len(nop)) * nop
+                    data = data + sled[len(data):]
+            self.qle_data.setText(bytes_to_str(data))
+            self.qle_datasz.setText(hex(len(data)))
+            if disasm is not None:
+                self.qle_fixedup.setText(disasm)
+            else:
+                self.qle_fixedup.setText("...")
         except KsError as e:
             self.error(str(e))
         except Exception as e:
@@ -480,7 +514,7 @@ class AssembleTab(QWidget):
         comment = None
         try:
             if self.check_save_original.isChecked():
-                (instxt, length) = disassemble_binja_single(self.bv, self.addr())
+                (instxt, length) = disassemble_capstone_single(self.bv, self.addr())
                 if instxt and length:
                     comment = 'previously: ' + instxt
         except Exception as e:
@@ -490,7 +524,6 @@ class AssembleTab(QWidget):
         try:
             with self.bv.undoable_transaction():
                 self.bv.write(self.addr(), data)
-
                 if comment:
                     self.bv.set_comment_at(self.addr(), comment)
         except Exception as e:
@@ -504,9 +537,10 @@ class AssembleTab(QWidget):
         self.qle_data.setText(msg)
         self.qle_data.home(True)
 
-#------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # fill range tool
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 class FillRangeTab(QWidget):
     def __init__(self, context, parent=None):
@@ -523,9 +557,10 @@ class FillRangeTab(QWidget):
         self.qle_encoding.setReadOnly(True)
         self.qle_encoding.setEnabled(False)
         self.qle_bytes = QLineEdit('00')
-        self.qle_fill_size = QLineEdit()
-        self.qle_fill_size.setReadOnly(True)
-        self.qle_fill_size.setEnabled(False)
+        # not used
+        # self.qle_fill_size = QLineEdit()
+        # self.qle_fill_size.setReadOnly(True)
+        # self.qle_fill_size.setEnabled(False)
         self.qle_preview = QLineEdit()
         self.qle_preview.setReadOnly(True)
         self.qle_preview.setEnabled(False)
@@ -561,6 +596,7 @@ class FillRangeTab(QWidget):
         self.qcb_sections.currentTextChanged.connect(self.section_chosen)
         self.qle_address.textChanged.connect(self.preview)
         self.qle_end.textChanged.connect(self.preview)
+        self.qle_datasz.textChanged.connect(self.preview_by_size_change)
 
         self.chk_encoding.toggled.connect(self.encoding_checked_toggle)
         self.chk_manual.toggled.connect(self.manual_checked_toggle)
@@ -600,9 +636,9 @@ class FillRangeTab(QWidget):
     def error(self, msg):
         self.qle_preview.setText('ERROR: ' + msg)
         self.qle_preview.home(True)
-        self.qle_datasz.setText('')
 
     # get the left, right, and length of the entered fill interval
+    # calculate length through left and right
     def interval(self):
         (a, b) = (0, 0)
         errval = (None, None, None)
@@ -618,23 +654,60 @@ class FillRangeTab(QWidget):
         except Exception:
             return errval
 
-        if (a,b) == (0, 0):
+        if (a, b) == (0, 0):
             # starting condition
             return errval
 
-        if a == b-1:
+        if a == b:
             self.error('empty interval')
             return errval
 
-        if a > b-1:
+        if a > b:
             self.error('negative interval')
             return errval
 
-        if b - a > (16*1024*1024):
+        if b - a > (16 * 1024 * 1024):
             self.error('too large (>16mb) interval')
             return errval
+        return (a, b, b - a)
 
-        return (a, b, b-a)
+    # Add a new function
+    # get the left, right, and length(size) of the entered fill interval
+    # calculate right through left and length(size)
+    def interval_by_size_change(self):
+        (a, b) = (0, 0)
+        errval = (None, None, None)
+
+        try:
+            a = int(self.qle_address.text(), 16)
+        except Exception:
+            self.error('malformed number: %s' % self.qle_address.text())
+            return errval
+
+        try:
+            size = int(self.qle_datasz.text(), 16)
+        except Exception:
+            return errval
+        if size <= 0:
+            self.error('length must > 0')
+            return errval
+        b = a + size
+        if (a, b) == (0, 0):
+            # starting condition
+            return errval
+
+        if a == b:
+            self.error('empty interval')
+            return errval
+
+        if a > b:
+            self.error('negative interval')
+            return errval
+
+        if b - a > (16 * 1024 * 1024):
+            self.error('too large (>16mb) interval')
+            return errval
+        return (a, b, size)
 
     # get the data (as bytes) from either:
     # - assembled bytes or manually
@@ -651,9 +724,7 @@ class FillRangeTab(QWidget):
         for bstr in text.split(' '):
             if bstr.startswith('0x'):
                 bstr = bstr[2:]
-            if len(bstr) != 2 or \
-              not bstr[0] in hexchars or \
-              not bstr[1] in hexchars:
+            if len(bstr) != 2 or not bstr[0] in hexchars or not bstr[1] in hexchars:
                 self.error('malformed byte: %s' % bstr)
                 return None
             buf += bytes([int(bstr, 16)])
@@ -692,9 +763,32 @@ class FillRangeTab(QWidget):
                 head = data * 6
                 tail = data * 2
             else:
-                head = (data * math.ceil(6/len(data)))[0:6]
+                head = (data * math.ceil(6 / len(data)))[0:6]
                 idx = len(data) + (fill_len % len(data)) - 2
-                tail = (data+data)[idx:idx+2]
+                tail = (data + data)[idx:idx + 2]
+
+            self.qle_preview.setText(bytes_to_str(head) + ' ... ' + bytes_to_str(tail))
+
+        self.qle_preview.home(True)
+
+    # Add a new function
+    def preview_by_size_change(self):
+        (st, ed, fill_len) = self.interval_by_size_change()
+        if not fill_len: return None
+        data = self.data()
+        if not data: return None
+        self.qle_end.setText(hex(ed))
+        if fill_len <= 8:
+            self.qle_preview.setText(bytes_to_str(data[0:fill_len]))
+        else:
+            # fill length > 8
+            if len(data) == 1:
+                head = data * 6
+                tail = data * 2
+            else:
+                head = (data * math.ceil(6 / len(data)))[0:6]
+                idx = len(data) + (fill_len % len(data)) - 2
+                tail = (data + data)[idx:idx + 2]
 
             self.qle_preview.setText(bytes_to_str(head) + ' ... ' + bytes_to_str(tail))
 
@@ -704,7 +798,7 @@ class FillRangeTab(QWidget):
         # get, validate the interval
         (left, right, length) = self.interval()
         if left == None: return None
-        for a in [left, right-1]:
+        for a in [left, right - 1]:
             if not is_valid_addr(self.bv, a):
                 self.error('0x%X invalid write address' % a)
                 return
@@ -715,16 +809,17 @@ class FillRangeTab(QWidget):
 
         # form the final write
         while len(data) < length:
-            data = data*2
+            data = data * 2
         data = data[0:length]
 
         # write it
-        #print('writing 0x%X bytes to 0x%X' % (len(data), left))
+        # print('writing 0x%X bytes to 0x%X' % (len(data), left))
         self.bv.write(left, data)
 
-#------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # search tool
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 class SearchTab(QWidget):
     def __init__(self, context, parent=None):
@@ -815,11 +910,11 @@ class SearchTab(QWidget):
             section = bview.sections[sname]
             start = section.start
             end = section.start + section.length
-            #print('searching section %s [0x%X, 0x%X)' % (sname, start, end))
+            # print('searching section %s [0x%X, 0x%X)' % (sname, start, end))
 
             # TODO: find better way
             # bview.read already bytes type ... no need to convert or copy bytes
-            buf = bview.read(start, end-start)
+            buf = bview.read(start, end - start)
 
             for m in regobj.finditer(buf):
                 addr = section.start + m.start()
@@ -829,14 +924,15 @@ class SearchTab(QWidget):
                 self.list_results.addItem(QListWidgetItem(info))
 
     def results_clicked(self, item):
-        #print('you double clicked %s' % item.text())
+        # print('you double clicked %s' % item.text())
         m = re.match(r'^.* ([a-fA-F0-9]+):', item.text())
         addr = int(m.group(1), 16)
         self.bv.navigate(self.bv.view, addr)
 
-#------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # top level tab gui
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 class KeypatchDialog(QDialog):
     def __init__(self, context, parent=None):
@@ -860,14 +956,15 @@ class KeypatchDialog(QDialog):
         #
         self.tab1.add_qles_bytes(self.tab2.qle_encoding)
         self.tab1.add_qles_bytes(self.tab3.qle_encoding)
-        self.tab1.reassemble()
+        self.tab1.re_assemble()
 
         self.tab1.setFocus()
         self.tab1.qle_assembly.setFocus()
 
-#------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # exported functions
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 # input: binaryninjaui.UIActionContext (struct UIActionContext from api/ui/action.h)
 def launch_keypatch(context):
