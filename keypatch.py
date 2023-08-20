@@ -144,7 +144,7 @@ def is_valid_addr(bview, addr):
         return False
     # otherwise
     else:
-        return addr >= bview.start and addr < (bview.start + len(bview))
+        return addr >= bview.start and addr < (bview.start + bview.length)
 
 # given a valid address, return least address after the valid that is invalid
 def get_invalid_addr(bview, addr):
@@ -161,7 +161,7 @@ def get_invalid_addr(bview, addr):
                 return end
     # otherwise
     else:
-        return bview.start + len(bv)
+        return bview.start + bview.length
 
 # disassemble using binaryninja
 # returns (<instruction_string>, <instruction_length>)
@@ -309,7 +309,7 @@ class AssembleTab(QWidget):
     def __init__(self, context, parent=None):
         super(AssembleTab, self).__init__(parent)
         self.context = context
-        self.bv = context.binaryView
+        self.bview = context.binaryView
 
         # other QLineEntry widgets to receive bytes upon assembling
         self.qles_bytes = []
@@ -374,7 +374,7 @@ class AssembleTab(QWidget):
         self.qle_address.setText(hex(self.context.address))
 
         # default assembly
-        (instxt, length) = disassemble_capstone_single(self.bv, context.address)
+        (instxt, length) = disassemble_capstone_single(self.bview, context.address)
         if instxt:
             self.qle_assembly.setText(instxt)
             self.qle_fixedup.setText(instxt)
@@ -436,7 +436,7 @@ class AssembleTab(QWidget):
             (ks, assembly, addr) = (self.ks(), self.asm(), self.addr())
 
             # apply fixup
-            fixedup = fixup(self.bv, assembly)
+            fixedup = fixup(self.bview, assembly)
             self.qle_fixedup.setText(fixedup)
 
             # assemble
@@ -447,7 +447,7 @@ class AssembleTab(QWidget):
 
             # pad with nops
             if self.check_nops.isChecked():
-                length = disassemble_length(self.bv, self.addr())
+                length = disassemble_length(self.bview, self.addr())
                 if length != None and length > len(data):
                     nop = get_nop(self.arch())
                     sled = (length // len(nop)) * nop
@@ -473,10 +473,10 @@ class AssembleTab(QWidget):
             addr = self.addr()
             data = bytes.fromhex(self.edit_bytes.text())
 
-            (disasm, length) = disassemble_capstone_single_data(self.bv, data, addr)
+            (disasm, length) = disassemble_capstone_single_data(self.bview, data, addr)
             # pad with nops
             if self.check_nops.isChecked():
-                length = disassemble_length(self.bv, self.addr())
+                length = disassemble_length(self.bview, self.addr())
                 if length != None and length > len(data):
                     nop = get_nop(self.arch())
                     sled = (length // len(nop)) * nop
@@ -500,7 +500,7 @@ class AssembleTab(QWidget):
         comment = None
         try:
             if self.check_save_original.isChecked():
-                (instxt, length) = disassemble_capstone_single(self.bv, self.addr())
+                (instxt, length) = disassemble_capstone_single(self.bview, self.addr())
                 if instxt and length:
                     comment = 'previously: ' + instxt
         except Exception as e:
@@ -508,10 +508,10 @@ class AssembleTab(QWidget):
             pass
 
         try:
-            with self.bv.undoable_transaction():
-                self.bv.write(self.addr(), data)
+            with self.bview.undoable_transaction():
+                self.bview.write(self.addr(), data)
                 if comment:
-                    self.bv.set_comment_at(self.addr(), comment)
+                    self.bview.set_comment_at(self.addr(), comment)
         except Exception as e:
             return
 
@@ -531,7 +531,7 @@ class FillRangeTab(QWidget):
     def __init__(self, context, parent=None):
         super(FillRangeTab, self).__init__(parent)
         self.context = context
-        self.bv = context.binaryView
+        self.bview = context.binaryView
 
         # this widget is VBox of QGroupBox
         layoutV = QVBoxLayout()
@@ -591,12 +591,12 @@ class FillRangeTab(QWidget):
         btn_fill.clicked.connect(self.fill)
 
         # set defaults
-        nop = get_nop(binja_to_ks[bv_to_arch(self.bv)])
+        nop = get_nop(binja_to_ks[bv_to_arch(self.bview)])
         if nop:
             self.qle_bytes.setText(bytes_to_str(nop))
 
-        for (sname, section) in self.bv.sections.items():
-            section = self.bv.sections[sname]
+        for (sname, section) in self.bview.sections.items():
+            section = self.bview.sections[sname]
             line = '%s [0x%X, 0x%X)' % (sname, section.start, section.start + section.length)
             self.qcb_sections.addItem(line)
 
@@ -604,7 +604,7 @@ class FillRangeTab(QWidget):
         self.chk_manual.setChecked(True)
 
         self.qle_address.setText(hex(self.context.address))
-        end = get_invalid_addr(self.bv, self.context.address)
+        end = get_invalid_addr(self.bview, self.context.address)
         if end != None:
             self.qle_end.setText(hex(end))
         btn_fill.setDefault(True)
@@ -730,7 +730,7 @@ class FillRangeTab(QWidget):
         self.chk_encoding.setChecked(not is_check)
         self.preview()
 
-    # selections -> preview field
+    # elections -> preview field
     def preview(self):
         (_, _, fill_len) = self.interval()
         if not fill_len: return None
@@ -779,10 +779,11 @@ class FillRangeTab(QWidget):
 
     def fill(self):
         # get, validate the interval
-        (left, right, length) = self.interval()
+        left, right, length = self.interval()
+        #print(f'filling [0x{left:X}, 0x{right:X}) length 0x{length:X}')
         if left == None: return None
         for a in [left, right - 1]:
-            if not is_valid_addr(self.bv, a):
+            if not is_valid_addr(self.bview, a):
                 self.error('0x%X invalid write address' % a)
                 return
 
@@ -796,8 +797,8 @@ class FillRangeTab(QWidget):
         data = data[0:length]
 
         # write it
-        # print('writing 0x%X bytes to 0x%X' % (len(data), left))
-        self.bv.write(left, data)
+        #print('writing 0x%X bytes to 0x%X' % (len(data), left))
+        self.bview.write(left, data)
 
 # ------------------------------------------------------------------------------
 # search tool
@@ -807,7 +808,7 @@ class SearchTab(QWidget):
     def __init__(self, context, parent=None):
         super(SearchTab, self).__init__(parent)
         self.context = context
-        self.bv = context.binaryView
+        self.bview = context.binaryView
 
         # this widget is VBox of QGroupBox
         layoutV = QVBoxLayout()
@@ -886,30 +887,34 @@ class SearchTab(QWidget):
         self.list_results.show()
 
         # loop through each section, searching it
-        bview = self.bv
-        width = max([len(sname) for sname in bview.sections])
-        for sname in bview.sections:
-            section = bview.sections[sname]
-            start = section.start
-            end = section.start + section.length
-            # print('searching section %s [0x%X, 0x%X)' % (sname, start, end))
+        bview = self.bview
 
-            # TODO: find better way
-            # bview.read already bytes type ... no need to convert or copy bytes
+        intervals = []
+        if bview.sections:
+            width = max([len(sname) for sname in bview.sections])
+            intervals = [(n, s.start, s.start + s.length) for n,s in bview.sections.items()]
+        else:
+            # some views don't have sections, like File -> New Binary Data
+            width = 3
+            intervals = [('raw', bview.start, bview.end)]
+
+        for name, start, end in intervals:
+            #print(f'searching bytes in [0x{start:X}, 0x{end:X})')
+
             buf = bview.read(start, end - start)
 
             for m in regobj.finditer(buf):
-                addr = section.start + m.start()
+                addr = start + m.start()
 
                 # m.group is bytes type
-                info = '%s %08X: %s' % (sname.rjust(width), addr, bytes_to_str(m.group()))
+                info = '%s %08X: %s' % (name.rjust(width), addr, bytes_to_str(m.group()))
                 self.list_results.addItem(QListWidgetItem(info))
 
     def results_clicked(self, item):
         # print('you double clicked %s' % item.text())
         m = re.match(r'^.* ([a-fA-F0-9]+):', item.text())
         addr = int(m.group(1), 16)
-        self.bv.navigate(self.bv.view, addr)
+        self.bview.navigate(self.bview.view, addr)
 
 # ------------------------------------------------------------------------------
 # top level tab gui
