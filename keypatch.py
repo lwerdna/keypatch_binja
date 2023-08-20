@@ -119,7 +119,6 @@ arch_to_reserved['x86_64'] = arch_to_reserved['x86'] + ['rax', 'rcx', 'rdx', 'rb
 font_mono = QFont('Courier New')
 font_mono.setStyleHint(QFont.TypeWriter)
 
-
 # ------------------------------------------------------------------------------
 # utilities
 # ------------------------------------------------------------------------------
@@ -131,7 +130,6 @@ def bv_to_arch(bview):
         return 'x86_64'
 
     return bview.arch.name
-
 
 # test if given address is valid binaryview address
 def is_valid_addr(bview, addr):
@@ -147,7 +145,6 @@ def is_valid_addr(bview, addr):
     # otherwise
     else:
         return addr >= bview.start and addr < (bview.start + len(bview))
-
 
 # given a valid address, return least address after the valid that is invalid
 def get_invalid_addr(bview, addr):
@@ -166,7 +163,6 @@ def get_invalid_addr(bview, addr):
     else:
         return bview.start + len(bv)
 
-
 # disassemble using binaryninja
 # returns (<instruction_string>, <instruction_length>)
 def disassemble_binja_single(bview, addr):
@@ -184,7 +180,6 @@ def disassemble_binja_single(bview, addr):
     strs = [t.text for t in tokens]
     strs = [' ' if s.isspace() else s for s in strs]
     return (''.join(strs), length)
-
 
 # disassemble using capstone
 # returns (<instruction_string>, <instruction_length>)
@@ -206,7 +201,6 @@ def disassemble_capstone_single(bview, addr):
     # fixed bug , <instruction_length> is 'size',not 'length'
     return (mnemonic + ' ' + op_str, size)
 
-
 # disassemble  data using capstone
 # returns (<instruction_string>, <instruction_length>)
 # returns (None, None) if unable to disassemble
@@ -221,26 +215,21 @@ def disassemble_capstone_single_data(bview, data, addr):
         return (None, None)
     return (mnemonic + ' ' + op_str, size)
 
-
 # get length of instruction at addr
 # returns None if unable to disassemble
 def disassemble_length(bview, addr):
     (instxt, length) = disassemble_binja_single(bview, addr)
     return length
 
-
 def error(msg):
     show_message_box('KEYPATCH', msg, MessageBoxButtonSet.OKButtonSet, MessageBoxIcon.ErrorIcon)
-
 
 # b'\xaa\xbb\xcc\xdd' -> 'AA BB CC DD'
 def bytes_to_str(data):
     return ' '.join(['%02X' % x for x in data])
 
-
 def strbytes_pretty(string):
     return ' '.join(['%02X' % ord(x) for x in string])
-
 
 def fixup(bview, assembly):
     reserved = arch_to_reserved[bv_to_arch(bview)]
@@ -283,7 +272,6 @@ def fixup(bview, assembly):
     # done
     return assembly
 
-
 # arch is keystone namespace
 def get_nop(arch):
     if arch in ['x16', 'x32', 'x64', 'x16att', 'x32att', 'x64att', 'x16nasm', 'x32nasm', 'x64nasm']:
@@ -312,7 +300,6 @@ def get_nop(arch):
         return b'\x01\x00\x00\x00'
 
     raise Exception('no NOP for architecture: %s' % arch)
-
 
 # ------------------------------------------------------------------------------
 # GUI
@@ -479,7 +466,6 @@ class AssembleTab(QWidget):
         except Exception as e:
             self.error(str(e))
 
-    # Add a new function
     # update the  self.qle_data.text() and self.qle_fixedup.text() through  self.edit_bytes.text()
     def re_disassemble(self):
         try:
@@ -536,7 +522,6 @@ class AssembleTab(QWidget):
             msg = 'ERROR: ' + msg
         self.qle_data.setText(msg)
         self.qle_data.home(True)
-
 
 # ------------------------------------------------------------------------------
 # fill range tool
@@ -671,7 +656,6 @@ class FillRangeTab(QWidget):
             return errval
         return (a, b, b - a)
 
-    # Add a new function
     # get the left, right, and length(size) of the entered fill interval
     # calculate right through left and length(size)
     def interval_by_size_change(self):
@@ -771,7 +755,6 @@ class FillRangeTab(QWidget):
 
         self.qle_preview.home(True)
 
-    # Add a new function
     def preview_by_size_change(self):
         (st, ed, fill_len) = self.interval_by_size_change()
         if not fill_len: return None
@@ -815,7 +798,6 @@ class FillRangeTab(QWidget):
         # write it
         # print('writing 0x%X bytes to 0x%X' % (len(data), left))
         self.bv.write(left, data)
-
 
 # ------------------------------------------------------------------------------
 # search tool
@@ -929,7 +911,6 @@ class SearchTab(QWidget):
         addr = int(m.group(1), 16)
         self.bv.navigate(self.bv.view, addr)
 
-
 # ------------------------------------------------------------------------------
 # top level tab gui
 # ------------------------------------------------------------------------------
@@ -960,7 +941,6 @@ class KeypatchDialog(QDialog):
 
         self.tab1.setFocus()
         self.tab1.qle_assembly.setFocus()
-
 
 # ------------------------------------------------------------------------------
 # exported functions
