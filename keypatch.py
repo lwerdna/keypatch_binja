@@ -239,7 +239,7 @@ def fixup(bview, assembly):
 
     # loop over every word character token
     for m in re.finditer(r'\w+', assembly):
-        if m.start == 0: continue  # do not replace mnemonic
+        if m.start() == 0: continue  # do not replace mnemonic
         symname = m.group(0)
 
         # is reserved word? ignore
