@@ -1,5 +1,7 @@
 Remake of [keypatch](https://github.com/keystone-engine/keypatch) plugin for Binary Ninja.
 
+Python != 3.10 is needed on arm64 macs to avoid install issues with keystone-engine.
+
 ![](./preview.png)
 
 * assemble using [keystone](https://www.keystone-engine.org/)
