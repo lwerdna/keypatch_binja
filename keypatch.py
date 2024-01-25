@@ -8,8 +8,8 @@ from PySide6.QtGui import QFont
 # Qt stuff
 from PySide6.QtWidgets import *
 from binaryninja.enums import MessageBoxButtonSet, MessageBoxIcon
-# binaryninja
 from binaryninja.interaction import show_message_box
+from binaryninjaui import UIContext
 # capstone/keystone stuff
 from capstone import *
 from keystone import *
@@ -86,36 +86,6 @@ for (name, descr, cs_arch, cs_mode, ks_arch, ks_mode) in architecture_infos:
     architecture_to_cs[name] = cs
     architecture_to_ks[name] = ks
 
-# map binary ninja architecture name to ks architecture name
-# [x.name for x in binaryninja.Architecture]
-binja_to_ks = {'aarch64': 'arm64', 'armv7': 'arm', 'armv7eb': 'armbe', 'thumb2': 'thumb', 'thumb2eb': 'thumbbe',
-               'mipsel32': 'mips', 'mips32': 'mipsbe', 'ppc': 'ppc32be', 'ppc_le': 'ERROR', 'ppc64': 'ppc64be',
-               'ppc64_le': 'ppc64', 'sh4': 'ERROR', 'x86_16': 'x16nasm', 'x86': 'x32nasm', 'x86_64': 'x64nasm'}
-
-# these words won't be substituted in assembly fixup
-arch_to_reserved = {
-    'aarch64': ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15',
-                'r16', 'r17', 'r18', 'r19', 'r20', 'r21', 'r22', 'r23', 'r24', 'r25', 'r26', 'r27', 'r28', 'r29', 'r30',
-                'r31'
-                'w0', 'w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15',
-                'w16', 'w17', 'w18', 'w19', 'w20', 'w21', 'w22', 'w23', 'w24', 'w25', 'w26', 'w27', 'w28', 'w29', 'w30',
-                'w31', 'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9', 'x10', 'x11', 'x12', 'x13', 'x14',
-                'x15', 'x16', 'x17', 'x18', 'x19', 'x20', 'x21', 'x22', 'x23', 'x24', 'x25', 'x26', 'x27', 'x28', 'x29',
-                'x30', 'x31'],
-    'armv7': ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'sp', 'lr', 'pc',
-              'apsr'], 'mips32': [], 'ppc': [],  # 'ppc_le',
-    'ppc64': [],  # 'sh4',
-    'x86_16': ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di', 'ah', 'al', 'ch', 'cl', 'dh', 'dl', 'bh', 'bl', 'ss',
-               'cs', 'ds', 'es']}
-arch_to_reserved['thumb2'] = arch_to_reserved['armv7']
-arch_to_reserved['thumb2eb'] = arch_to_reserved['thumb2']
-arch_to_reserved['armv7eb'] = arch_to_reserved['armv7']
-arch_to_reserved['mipsel32'] = arch_to_reserved['mips32']
-arch_to_reserved['ppc64_le'] = arch_to_reserved['ppc64']
-arch_to_reserved['x86'] = arch_to_reserved['x86_16'] + ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi', 'fs',
-                                                        'gs']
-arch_to_reserved['x86_64'] = arch_to_reserved['x86'] + ['rax', 'rcx', 'rdx', 'rbx', 'rsp', 'rbp', 'rsi', 'rdi']
-
 font_mono = QFont('Courier New')
 font_mono.setStyleHint(QFont.TypeWriter)
 
@@ -123,13 +93,47 @@ font_mono.setStyleHint(QFont.TypeWriter)
 # utilities
 # ------------------------------------------------------------------------------
 
-def bv_to_arch(bview):
-    # sometimes the binary view has no arch, like when File->New->Binary Data
-    if bview.arch == None:
-        # return x64 by default
-        return 'x86_64'
+# return the name of the architecture, in the capstone/keystone namespace
+def determine_arch(bview):
+    arch = None
 
-    return bview.arch.name
+    # determine the architecture name in the binja namespace
+
+    # if there's a current function, use that architecture, as it can distinguish
+    # between arm/thumb, whereas bv.arch would just be arm
+    try:
+        ac = UIContext.activeContext().contentActionHandler().actionContext()
+        current_function = ac.function
+        arch = current_function.arch
+    except Exception as e:
+        pass
+
+    # use architecture from binaryview
+    if arch == None:
+        arch = bview.arch
+
+    # sometimes the binaryview has no arch, like when File->New->Binary Data
+    if arch == None:
+        arch = binaryninja.Architecture['x86_64']
+
+    # map how binja names architectures to how keystone names architectures:
+    return {
+        'aarch64': 'arm64',
+        'armv7': 'arm',
+        'armv7eb': 'armbe',
+        'thumb2': 'thumb',
+        'thumb2eb': 'thumbbe',
+        'mipsel32': 'mips',
+        'mips32': 'mipsbe',
+        'ppc': 'ppc32be',
+        'ppc_le': 'ERROR',
+        'ppc64': 'ppc64be',
+        'ppc64_le': 'ppc64',
+        'sh4': 'ERROR',
+        'x86_16': 'x16nasm',
+        'x86': 'x32nasm',
+        'x86_64': 'x64nasm'
+    }[arch.name]
 
 # test if given address is valid binaryview address
 def is_valid_addr(bview, addr):
@@ -163,50 +167,11 @@ def get_invalid_addr(bview, addr):
     else:
         return bview.start + bview.length
 
-# disassemble using binaryninja
-# returns (<instruction_string>, <instruction_length>)
-def disassemble_binja_single(bview, addr):
-    errval = (None, None)
-    if not is_valid_addr(bview, addr):
-        return errval
-    end = get_invalid_addr(bview, addr)
-    if end == None:
-        return errval
-    length = min(16, end - addr)
-    data = bview.read(addr, length)
-    (tokens, length) = bview.arch.get_instruction_text(data, addr)
-    if not tokens or not length:
-        return errval
-    strs = [t.text for t in tokens]
-    strs = [' ' if s.isspace() else s for s in strs]
-    return (''.join(strs), length)
-
-# disassemble using capstone
+# disassemble some given data
 # returns (<instruction_string>, <instruction_length>)
 # returns (None, None) if unable to disassemble
-def disassemble_capstone_single(bview, addr):
-    if not is_valid_addr(bview, addr):
-        return (None, None)
-    end = get_invalid_addr(bview, addr)
-    length = min(16, end - addr)
-    data = bview.read(addr, length)
-    arch_name = binja_to_ks[bv_to_arch(bview)]
-    md = architecture_to_cs[arch_name]
-    try:
-        (addr, size, mnemonic, op_str) = next(md.disasm_lite(data, addr, 1))
-        if not size:
-            return (None, None)
-    except StopIteration:
-        return (None, None)
-    # fixed bug , <instruction_length> is 'size',not 'length'
-    return (mnemonic + ' ' + op_str, size)
-
-# disassemble  data using capstone
-# returns (<instruction_string>, <instruction_length>)
-# returns (None, None) if unable to disassemble
-def disassemble_capstone_single_data(bview, data, addr):
-    arch_name = binja_to_ks[bv_to_arch(bview)]
-    md = architecture_to_cs[arch_name]
+def disassemble(bview, arch, data, addr):
+    md = architecture_to_cs[arch]
     try:
         (addr, size, mnemonic, op_str) = next(md.disasm_lite(data, addr, 1))
         if not size:
@@ -214,11 +179,22 @@ def disassemble_capstone_single_data(bview, data, addr):
     except StopIteration:
         return (None, None)
     return (mnemonic + ' ' + op_str, size)
+
+# disassemble from an address in the BinaryView, with the given arch
+# returns (<instruction_string>, <instruction_length>)
+# returns (None, None) if unable to disassemble
+def disassemble_bview(bview, arch, addr):
+    if not is_valid_addr(bview, addr):
+        return (None, None)
+    end = get_invalid_addr(bview, addr)
+    length = min(16, end - addr)
+    data = bview.read(addr, length)
+    return disassemble(bview, arch, data, addr)
 
 # get length of instruction at addr
 # returns None if unable to disassemble
-def disassemble_length(bview, addr):
-    (instxt, length) = disassemble_binja_single(bview, addr)
+def disassemble_length(bview, arch, addr):
+    (instxt, length) = disassemble_bview(bview, arch, addr)
     return length
 
 def error(msg):
@@ -231,8 +207,18 @@ def bytes_to_str(data):
 def strbytes_pretty(string):
     return ' '.join(['%02X' % ord(x) for x in string])
 
-def fixup(bview, assembly):
-    reserved = arch_to_reserved[bv_to_arch(bview)]
+def fixup(bview, arch_name, assembly):
+    reserved = {
+        'mips': [],
+        'arm':     ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15', 'sp', 'lr', 'pc', 'apsr'],
+        'armbe':   ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15', 'sp', 'lr', 'pc', 'apsr'],
+        'thumb':   ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15', 'sp', 'lr', 'pc', 'apsr'],
+        'thumbbe': ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15', 'sp', 'lr', 'pc', 'apsr'],
+        'arm64':   ['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9', 'x10', 'x11', 'x12', 'x13', 'x14', 'x15', 'x16', 'x17', 'x18', 'x19', 'x20', 'x21', 'x22', 'x23', 'x24', 'x25', 'x26', 'x27', 'x28', 'x29', 'x30', 'x31', 'fp', 'lr', 'pc', 'w0', 'w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8', 'w9', 'w10', 'w11', 'w12', 'w13', 'w14', 'w15', 'w16', 'w17', 'w18', 'w19', 'w20', 'w21', 'w22', 'w23', 'w24', 'w25', 'w26', 'w27', 'w28', 'w29', 'w30', 'w31'],
+        'x16nasm': ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di', 'ah', 'al', 'ch', 'cl', 'dh', 'dl', 'bh', 'bl', 'ss', 'cs', 'ds', 'es'],
+        'x32nasm': ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di', 'ah', 'al', 'ch', 'cl', 'dh', 'dl', 'bh', 'bl', 'ss', 'cs', 'ds', 'es', 'eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi', 'fs'],
+        'x64nasm': ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di', 'ah', 'al', 'ch', 'cl', 'dh', 'dl', 'bh', 'bl', 'ss', 'cs', 'ds', 'es', 'eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi', 'fs', 'rax', 'rcx', 'rdx', 'rbx', 'rsp', 'rbp', 'rsi', 'rdi']
+    }.get(arch_name)
 
     # collect substitutions we'll make
     substitutions = []
@@ -366,15 +352,14 @@ class AssembleTab(QWidget):
             line = '%s: %s' % (name, descr)
             self.qcb_arch.addItem(line)
 
-        bv_arch_name = bv_to_arch(context.binaryView)
-        ks_arch_name = binja_to_ks.get(bv_arch_name, 'x64')
+        ks_arch_name = determine_arch(context.binaryView)
         self.qcb_arch.setCurrentIndex(([x[0] for x in architecture_infos]).index(ks_arch_name))
 
         # default address to assemble
         self.qle_address.setText(hex(self.context.address))
 
         # default assembly
-        (instxt, length) = disassemble_capstone_single(self.bview, context.address)
+        (instxt, length) = disassemble_bview(self.bview, self.arch(), context.address)
         if instxt:
             self.qle_assembly.setText(instxt)
             self.qle_fixedup.setText(instxt)
@@ -403,6 +388,9 @@ class AssembleTab(QWidget):
     #
     # accessors
     #
+
+    # get selected architecture from drop-down menu
+    # (this was set initially by sensing the environment)
     def arch(self):
         # 'thumbv8: Thumb V8 - little endian' -> 'thumbv8'
         name_descr = self.qcb_arch.currentText()
@@ -436,7 +424,7 @@ class AssembleTab(QWidget):
             (ks, assembly, addr) = (self.ks(), self.asm(), self.addr())
 
             # apply fixup
-            fixedup = fixup(self.bview, assembly)
+            fixedup = fixup(self.bview, self.arch(), assembly)
             self.qle_fixedup.setText(fixedup)
 
             # assemble
@@ -447,7 +435,7 @@ class AssembleTab(QWidget):
 
             # pad with nops
             if self.check_nops.isChecked():
-                length = disassemble_length(self.bview, self.addr())
+                length = disassemble_length(self.bview, self.arch(), self.addr())
                 if length != None and length > len(data):
                     nop = get_nop(self.arch())
                     sled = (length // len(nop)) * nop
@@ -466,17 +454,17 @@ class AssembleTab(QWidget):
         except Exception as e:
             self.error(str(e))
 
-    # update the  self.qle_data.text() and self.qle_fixedup.text() through  self.edit_bytes.text()
+    # update the self.qle_data.text() and self.qle_fixedup.text() through self.edit_bytes.text()
     def re_disassemble(self):
         try:
             # get input
             addr = self.addr()
             data = bytes.fromhex(self.edit_bytes.text())
 
-            (disasm, length) = disassemble_capstone_single_data(self.bview, data, addr)
+            (disasm, length) = disassemble(self.bview, self.arch(), data, addr)
             # pad with nops
             if self.check_nops.isChecked():
-                length = disassemble_length(self.bview, self.addr())
+                length = disassemble_length(self.bview, self.arch(), self.addr())
                 if length != None and length > len(data):
                     nop = get_nop(self.arch())
                     sled = (length // len(nop)) * nop
@@ -500,7 +488,7 @@ class AssembleTab(QWidget):
         comment = None
         try:
             if self.check_save_original.isChecked():
-                (instxt, length) = disassemble_capstone_single(self.bview, self.addr())
+                (instxt, length) = disassemble_bview(self.bview, self.arch(), self.addr())
                 if instxt and length:
                     comment = 'previously: ' + instxt
         except Exception as e:
@@ -591,7 +579,7 @@ class FillRangeTab(QWidget):
         btn_fill.clicked.connect(self.fill)
 
         # set defaults
-        nop = get_nop(binja_to_ks[bv_to_arch(self.bview)])
+        nop = get_nop(determine_arch(self.bview))
         if nop:
             self.qle_bytes.setText(bytes_to_str(nop))
 

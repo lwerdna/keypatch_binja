@@ -16,7 +16,8 @@ https://docs.binary.ninja/dev/plugins.html
 
 Tests that must pass before PR considered, release made, etc.
 
-* file -> new binary data -> 1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 1f 20 03 d5, create aarch64 function, now use keypatch to assemble at 0, 4, 8, and C the instruction `bl 0x1000`
+* file -> new binary data -> 1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 (right click, paste from, raw hex)
+* create aarch64 function, now use keypatch to assemble at 0, 4, 8, and C the instruction `bl 0x1000`
 * fill from [0x4, 0xc) with manually entered bytes AA AA AA AA and get two `orn x10, x21, x10, asr #0x2a`
 * now fill from [0x4, 0xc) with assembled `nop`
-* now search for `1f .*? d5` and it shoudl hit at every nop
+* now search for `1f .*? d5` and it should hit at every nop (at 4 and 8)
