@@ -786,7 +786,8 @@ class FillRangeTab(QWidget):
 
         # write it
         #print('writing 0x%X bytes to 0x%X' % (len(data), left))
-        self.bview.write(left, data)
+        with self.bview.undoable_transaction():
+            self.bview.write(left, data)
 
 # ------------------------------------------------------------------------------
 # search tool
